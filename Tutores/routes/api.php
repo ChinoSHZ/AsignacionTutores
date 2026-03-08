@@ -10,38 +10,50 @@ use Illuminate\Support\Facades\DB;
 |--------------------------------------------------------------------------
 */
 
-// 1. Endpoint para llenar el ComboBox en Flutter
 Route::get('/tablas', function () {
     try {
-        // PostgreSQL es estricto con los nombres. 
-        // Usamos LOWER() para asegurar que encuentre el esquema sin importar si hay variaciones.
         $tablas = DB::select("SELECT table_name 
                               FROM information_schema.tables 
-                              WHERE LOWER(table_schema) = LOWER('tutoria') 
+                              WHERE LOWER(table_schema) = 'tutoria' 
                               AND table_type = 'BASE TABLE'
                               ORDER BY table_name ASC");
-        
         return response()->json($tablas);
     } catch (\Exception $e) {
-        return response()->json(['error' => 'Error al listar tablas: ' . $e->getMessage()], 500);
+        return response()->json(['error' => $e->getMessage()], 500);
     }
 });
 
-// 2. Endpoint para llenar el DataTable en Flutter
 Route::get('/datos/{tabla}', function ($tabla) {
     try {
-        // Seguridad: Solo permitir caracteres alfanuméricos y guiones bajos
         if (!preg_match('/^[a-zA-Z0-9_]+$/', $tabla)) {
-            return response()->json(['error' => 'Nombre de tabla no válido'], 400);
+            return response()->json(['error' => 'Nombre no válido'], 400);
         }
 
-        // Importante: En PostgreSQL, si la tabla está en un esquema que no es 'public',
-        // debemos usar la notación de punto encerrada en comillas si hay mayúsculas,
-        // o simplemente "esquema"."tabla".
-        $registros = DB::table("tutoria.$tabla")->get();
+        $tablaLower = strtolower($tabla);
+
+        // Si es GRUPO o BORRADOR, forzamos los JOINs con el esquema 'tutoria'
+        if ($tablaLower === 'grupo' || $tablaLower === 'borrador') {
+            $registros = DB::table("tutoria.$tablaLower as t")
+                ->join("tutoria.profesores as p", "t.correo_profe", "=", "p.correo")
+                ->join("tutoria.alumnos as a", "t.num_cuenta", "=", "a.num_cuenta")
+                ->select(
+                    "t.*", 
+                    "p.nombre as nombre_profesor", 
+                    "a.nombre as nombre_alumno"
+                )
+                ->get();
+        } else {
+            $registros = DB::table("tutoria.$tablaLower")->get();
+        }
 
         return response()->json($registros);
+
     } catch (\Exception $e) {
-        return response()->json(['error' => "Error en tabla '$tabla': " . $e->getMessage()], 500);
+        // MUY IMPORTANTE: Este mensaje te dirá exactamente qué falta en tu base de datos
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Error en la base de datos',
+            'sql_error' => $e->getMessage()
+        ], 500);
     }
 });
