@@ -54,7 +54,7 @@ class _UploadScreenState extends State<UploadScreen> {
                 Container(
                   width: 44, height: 44,
                   decoration: BoxDecoration(
-                    color: AppTheme.green.withOpacity(0.15),
+                    color: AppTheme.green.withValues(alpha:0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(Icons.check_circle_rounded, color: AppTheme.green),
@@ -119,10 +119,10 @@ class _FileDropZone extends StatelessWidget {
         duration: const Duration(milliseconds: 300),
         height: 200,
         decoration: BoxDecoration(
-          color: isLoaded ? color.withOpacity(0.08) : AppTheme.surface,
+          color: isLoaded ? color.withValues(alpha:0.08) : AppTheme.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isLoaded ? color.withOpacity(0.4) : AppTheme.border,
+            color: isLoaded ? color.withValues(alpha:0.4) : AppTheme.border,
             width: isLoaded ? 1.5 : 1,
           ),
         ),
@@ -132,7 +132,7 @@ class _FileDropZone extends StatelessWidget {
             Container(
               width: 56, height: 56,
               decoration: BoxDecoration(
-                color: isLoaded ? color.withOpacity(0.2) : AppTheme.surfaceLight,
+                color: isLoaded ? color.withValues(alpha:0.2) : AppTheme.surfaceLight,
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(
@@ -161,9 +161,9 @@ class _FileDropZone extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha:0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: color.withOpacity(0.3)),
+                  border: Border.all(color: color.withValues(alpha:0.3)),
                 ),
                 child: Text('Seleccionar archivo', style: TextStyle(
                   color: color, fontSize: 12, fontWeight: FontWeight.w600,
@@ -223,9 +223,9 @@ class _RuleChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha:0.1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.25)),
+        border: Border.all(color: color.withValues(alpha:0.25)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 14, color: color),

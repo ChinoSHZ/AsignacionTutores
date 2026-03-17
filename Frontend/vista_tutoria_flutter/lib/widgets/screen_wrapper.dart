@@ -54,9 +54,9 @@ class ScreenWrapper extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: AppTheme.green.withOpacity(0.1),
+                  color: AppTheme.green.withValues(alpha:0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppTheme.green.withOpacity(0.3)),
+                  border: Border.all(color: AppTheme.green.withValues(alpha:0.3)),
                 ),
                 child: Row(children: [
                   Container(

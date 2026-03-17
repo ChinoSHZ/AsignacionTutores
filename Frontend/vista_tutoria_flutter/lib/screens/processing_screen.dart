@@ -63,9 +63,9 @@ class _StatBox extends StatelessWidget {
     return Expanded(child: Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha:0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.25)),
+        border: Border.all(color: color.withValues(alpha:0.25)),
       ),
       child: Column(children: [
         Text(value, style: TextStyle(color: color, fontSize: 28, fontWeight: FontWeight.w800)),
@@ -98,7 +98,7 @@ class _LogItem extends StatelessWidget {
         Container(
           width: 36, height: 36,
           decoration: BoxDecoration(
-            color: color.withOpacity(0.12),
+            color: color.withValues(alpha:0.12),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(icon, color: color, size: 18),
@@ -110,7 +110,7 @@ class _LogItem extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha:0.1),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Text(detail, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),

@@ -82,7 +82,7 @@ class _LogsScreenState extends State<LogsScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.inbox_rounded, size: 48, color: AppTheme.textSecondary.withOpacity(0.5)),
+                  Icon(Icons.inbox_rounded, size: 48, color: AppTheme.textSecondary.withValues(alpha:0.5)),
                   const SizedBox(height: 16),
                   Text('No hay registros de tipo "${_getFilterName(_activeFilter)}"', 
                     style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
@@ -104,13 +104,13 @@ class _LogsScreenState extends State<LogsScreen> {
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: color.withOpacity(0.25)),
+                  border: Border.all(color: color.withValues(alpha:0.25)),
                 ),
                 child: Row(children: [
                   Container(
                     width: 36, height: 36,
                     decoration: BoxDecoration(
-                      color: color.withOpacity(0.12),
+                      color: color.withValues(alpha:0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(icon, color: color, size: 18),
@@ -132,7 +132,7 @@ class _LogsScreenState extends State<LogsScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: color.withOpacity(0.1),
+                      color: color.withValues(alpha:0.1),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(log.type.toUpperCase(), style: TextStyle(
@@ -200,10 +200,10 @@ class _FilterStatCard extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: BoxDecoration(
-            color: isSelected ? color.withOpacity(0.15) : Colors.transparent,
+            color: isSelected ? color.withValues(alpha:0.15) : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isSelected ? color.withOpacity(0.5) : Colors.transparent,
+              color: isSelected ? color.withValues(alpha:0.5) : Colors.transparent,
             ),
           ),
           child: Column(children: [

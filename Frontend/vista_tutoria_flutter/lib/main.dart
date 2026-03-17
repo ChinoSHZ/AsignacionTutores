@@ -24,7 +24,7 @@ class TutorAssignmentApp extends StatelessWidget {
           bodyMedium: TextStyle(color: AppTheme.textPrimary, fontFamily: 'monospace'),
         ),
         scrollbarTheme: ScrollbarThemeData(
-          thumbColor: WidgetStateProperty.all(AppTheme.accent.withOpacity(0.4)),
+          thumbColor: WidgetStateProperty.all(AppTheme.accent.withValues(alpha:0.4)),
         ),
       ),
       home: const MainShell(),

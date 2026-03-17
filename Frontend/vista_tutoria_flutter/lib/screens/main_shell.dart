@@ -7,6 +7,7 @@ import 'processing_screen.dart';
 import 'dashboard_screen.dart';
 import 'assignments_screen.dart';
 import 'logs_screen.dart';
+import 'tutors_screen.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -59,16 +60,13 @@ class _MainShellState extends State<MainShell> {
 
   Widget _buildScreen() {
     switch (_current) {
-      case Screen.upload:
-        return const UploadScreen();
-      case Screen.processing:
-        return const ProcessingScreen();
-      case Screen.dashboard:
-        return DashboardScreen(tutors: tutors);
-      case Screen.assignments:
-        return AssignmentsScreen(tutors: tutors, students: students, onReassign: _reassign);
-      case Screen.logs:
-        return LogsScreen(logs: mockLogs);
+      case Screen.upload: return const UploadScreen();
+      case Screen.processing: return const ProcessingScreen();
+      case Screen.dashboard: return DashboardScreen(tutors: tutors);
+      // NUEVO: Agregamos el case para la pantalla de Tutores
+      case Screen.tutors: return TutorsScreen(tutors: tutors);
+      case Screen.assignments: return AssignmentsScreen(tutors: tutors, students: students, onReassign: _reassign);
+      case Screen.logs: return LogsScreen(logs: mockLogs);
     }
   }
 }
@@ -85,6 +83,8 @@ class _Sidebar extends StatelessWidget {
       (Screen.upload, Icons.upload_file_rounded, 'Cargar Datos'),
       (Screen.processing, Icons.auto_fix_high_rounded, 'Procesamiento'),
       (Screen.dashboard, Icons.dashboard_rounded, 'Dashboard'),
+      // NUEVO: Agregamos el ítem al menú
+      (Screen.tutors, Icons.badge_rounded, 'Tutores'),
       (Screen.assignments, Icons.people_alt_rounded, 'Asignaciones'),
       (Screen.logs, Icons.history_rounded, 'Registro'),
     ];
@@ -133,7 +133,7 @@ class _Sidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text('NAVEGACIÓN', style: TextStyle(
-              color: AppTheme.textSecondary.withOpacity(0.6),
+              color: AppTheme.textSecondary.withValues(alpha:0.6),
               fontSize: 10,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.5,
@@ -154,9 +154,9 @@ class _Sidebar extends StatelessWidget {
             margin: const EdgeInsets.all(16),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppTheme.accent.withOpacity(0.1),
+              color: AppTheme.accent.withValues(alpha:0.1),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.accent.withOpacity(0.2)),
+              border: Border.all(color: AppTheme.accent.withValues(alpha:0.2)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -207,9 +207,9 @@ class _SidebarItem extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: isActive ? AppTheme.accent.withOpacity(0.15) : Colors.transparent,
+          color: isActive ? AppTheme.accent.withValues(alpha:0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-          border: isActive ? Border.all(color: AppTheme.accent.withOpacity(0.3)) : null,
+          border: isActive ? Border.all(color: AppTheme.accent.withValues(alpha:0.3)) : null,
         ),
         child: Row(
           children: [

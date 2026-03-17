@@ -188,7 +188,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
 
               return Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                color: s.wasReassigned ? AppTheme.yellow.withOpacity(0.04) : Colors.transparent,
+                color: s.wasReassigned ? AppTheme.yellow.withValues(alpha:0.04) : Colors.transparent,
                 child: Row(children: [
                   Expanded(flex: 2, child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,7 +202,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                             decoration: BoxDecoration(
-                              color: AppTheme.yellow.withOpacity(0.2),
+                              color: AppTheme.yellow.withValues(alpha:0.2),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: const Text('Movido', style: TextStyle(
@@ -219,18 +219,20 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                   Expanded(flex: 2, child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppTheme.accent.withOpacity(0.1),
+                      color: AppTheme.accent.withValues(alpha:0.1),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(s.career, style: const TextStyle(
                       color: AppTheme.accentLight, fontSize: 12,
                     )),
                   )),
+                  
+                  // AQUI OCURRIÓ EL ERROR: Aseguramos cerrar correctamente Expanded > Row > ...
                   Expanded(flex: 3, child: Row(children: [
                     Container(
                       width: 28, height: 28,
                       decoration: BoxDecoration(
-                        color: AppTheme.statusColor(tutor.status).withOpacity(0.15),
+                        color: AppTheme.statusColor(tutor.status).withValues(alpha:0.15),
                         shape: BoxShape.circle,
                       ),
                       child: Center(child: Text(
@@ -246,22 +248,41 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                     Expanded(child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(tutor.name, style: const TextStyle(
-                          color: AppTheme.textPrimary, fontSize: 12,
-                        ), overflow: TextOverflow.ellipsis),
+                        Row(children: [
+                          Expanded(
+                            child: Text(tutor.name, style: const TextStyle(
+                              color: AppTheme.textPrimary, fontSize: 12,
+                            ), overflow: TextOverflow.ellipsis),
+                          ),
+                          // Badge de Estado del Tutor
+                          Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: tutor.isActive ? AppTheme.green.withValues(alpha:0.15) : AppTheme.red.withValues(alpha:0.15),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: tutor.isActive ? AppTheme.green.withValues(alpha:0.3) : AppTheme.red.withValues(alpha:0.3)),
+                            ),
+                            child: Text(tutor.isActive ? 'Activo' : 'Baja', style: TextStyle(
+                              color: tutor.isActive ? AppTheme.green : AppTheme.red,
+                              fontSize: 8, fontWeight: FontWeight.w700,
+                            )),
+                          ),
+                        ]),
                         Text('${tutor.count} alumnos', style: TextStyle(
                           color: AppTheme.statusColor(tutor.status), fontSize: 10,
                         )),
                       ],
                     )),
-                  ])),
+                  ])), // <--- ESTOS CIERRES FALTABAN: ] para Row, ) para flex, ) para Expanded
+
                   Expanded(flex: 2, child: Row(children: [
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: mobilityColor.withOpacity(0.1),
+                        color: mobilityColor.withValues(alpha:0.1),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: mobilityColor.withOpacity(0.3)),
+                        border: Border.all(color: mobilityColor.withValues(alpha:0.3)),
                       ),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Icon(
@@ -300,7 +321,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                         label: const Text('Reasignar', style: TextStyle(fontSize: 11)),
                         style: TextButton.styleFrom(
                           foregroundColor: AppTheme.accent,
-                          backgroundColor: AppTheme.accent.withOpacity(0.1),
+                          backgroundColor: AppTheme.accent.withValues(alpha:0.1),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         ),
@@ -393,7 +414,7 @@ class _ReassignDialog extends StatelessWidget {
               Container(
                 width: 40, height: 40,
                 decoration: BoxDecoration(
-                  color: AppTheme.accent.withOpacity(0.15),
+                  color: AppTheme.accent.withValues(alpha:0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(Icons.swap_horiz_rounded, color: AppTheme.accent, size: 22),
@@ -466,13 +487,13 @@ class _ReassignDialog extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: AppTheme.surfaceLight,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: color.withOpacity(0.3)),
+                      border: Border.all(color: color.withValues(alpha:0.3)),
                     ),
                     child: Row(children: [
                       Container(
                         width: 36, height: 36,
                         decoration: BoxDecoration(
-                          color: color.withOpacity(0.15),
+                          color: color.withValues(alpha:0.15),
                           shape: BoxShape.circle,
                         ),
                         child: Center(child: Text(t.name.split(' ').last[0], style: TextStyle(
@@ -496,7 +517,7 @@ class _ReassignDialog extends StatelessWidget {
                           color: color, fontSize: 20, fontWeight: FontWeight.w800,
                         )),
                         Text(spotsLeft > 0 ? '+$spotsLeft espacios' : 'lleno', style: TextStyle(
-                          color: color.withOpacity(0.7), fontSize: 10,
+                          color: color.withValues(alpha:0.7), fontSize: 10,
                         )),
                       ]),
                       const SizedBox(width: 10),

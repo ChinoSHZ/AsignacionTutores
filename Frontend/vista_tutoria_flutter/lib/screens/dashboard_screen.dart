@@ -51,9 +51,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (critical > 0) Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: AppTheme.red.withOpacity(0.1),
+            color: AppTheme.red.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.red.withOpacity(0.4)),
+            border: Border.all(color: AppTheme.red.withValues(alpha: 0.4)),
           ),
           child: const Row(children: [
             Icon(Icons.error_rounded, color: AppTheme.red),
@@ -90,7 +90,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   selected: _filterCareer == c,
                   onSelected: (val) => setState(() => _filterCareer = c),
                   backgroundColor: AppTheme.surfaceLight,
-                  selectedColor: AppTheme.accent.withOpacity(0.2),
+                  selectedColor: AppTheme.accent.withValues(alpha: 0.2),
                   checkmarkColor: AppTheme.accentLight,
                   labelStyle: TextStyle(
                     color: _filterCareer == c ? AppTheme.accentLight : AppTheme.textSecondary,
@@ -158,9 +158,9 @@ class _CompactTutorCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceLight.withOpacity(0.5),
+        color: AppTheme.surfaceLight.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -171,7 +171,7 @@ class _CompactTutorCard extends StatelessWidget {
               Container(
                 width: 24, height: 24,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.15),
+                  color: color.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
                 child: Center(child: Text(
@@ -197,7 +197,7 @@ class _CompactTutorCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value: pct,
-              backgroundColor: color.withOpacity(0.15),
+              backgroundColor: color.withValues(alpha: 0.15),
               valueColor: AlwaysStoppedAnimation<Color>(color),
               minHeight: 4,
             ),
@@ -230,7 +230,7 @@ class _MetricCard extends StatelessWidget {
             Container(
               width: 36, height: 36,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.15),
+                color: color.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(icon, color: color, size: 18),
@@ -273,13 +273,13 @@ class _TutorCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withOpacity(0.4)),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Row(children: [
         Container(
           width: 42, height: 42,
           decoration: BoxDecoration(
-            color: color.withOpacity(0.15),
+            color: color.withValues(alpha: 0.15),
             shape: BoxShape.circle,
           ),
           child: Center(child: Text(
@@ -304,7 +304,7 @@ class _TutorCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
                 value: pct,
-                backgroundColor: color.withOpacity(0.15),
+                backgroundColor: color.withValues(alpha: 0.15),
                 valueColor: AlwaysStoppedAnimation<Color>(color),
                 minHeight: 5,
               ),

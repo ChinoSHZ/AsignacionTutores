@@ -2,13 +2,20 @@ import 'package:flutter/material.dart';
 
 enum BalanceStatus { balanced, warning, critical }
 enum MobilityFlag { canChange, noChange, newStudent }
-enum Screen { upload, processing, dashboard, assignments, logs }
+// NUEVO: Agregamos 'tutors' entre dashboard y assignments
+enum Screen { upload, processing, dashboard, tutors, assignments, logs } 
 
 class Tutor {
   final String id;
   final String name;
   final String department;
   final List<String> careers;
+  
+  // NUEVOS CAMPOS
+  String email;
+  bool hasAI;
+  bool isActive;
+  
   List<Student> students;
 
   Tutor({
@@ -16,6 +23,9 @@ class Tutor {
     required this.name,
     required this.department,
     required this.careers,
+    this.email = '', // Valor por defecto
+    this.hasAI = false, // Valor por defecto
+    this.isActive = true, // Activo por defecto
     List<Student>? students,
   }) : students = students ?? [];
 
