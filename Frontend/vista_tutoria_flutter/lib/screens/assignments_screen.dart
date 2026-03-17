@@ -29,6 +29,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
     return widget.students.where((s) {
       final matchSearch = _searchQuery.isEmpty ||
           s.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+          s.accountNumber.contains(_searchQuery) ||
           s.id.toLowerCase().contains(_searchQuery.toLowerCase());
       final matchCareer = _filterCareer == 'Todas' || s.career == _filterCareer;
       final matchMobility = _filterMobility == 'Todas' ||
@@ -57,12 +58,32 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
     );
   }
 
+  void _showEditDialog(Student student) {
+    showDialog(
+      context: context,
+      builder: (_) => _EditStudentDialog(
+        student: student,
+        tutors: widget.tutors,
+        onSave: (String career, MobilityFlag mobility, String tutorId) {
+          setState(() {
+            student.career = career;
+            student.mobility = mobility;
+            if (student.tutorId != tutorId) {
+              widget.onReassign(student, tutorId);
+            }
+          });
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = _filtered;
     final careers = ['Todas', ...{...widget.students.map((s) => s.career)}];
     final mobilities = ['Todas', 'Nuevo Ingreso', 'Sí Cambiar', 'No Cambiar'];
     
+    // Filtro dependiente para tutores
     final availableTutorsForFilter = _filterCareer == 'Todas'
         ? widget.tutors 
         : widget.tutors.where((t) => t.careers.contains(_filterCareer)).toList(); 
@@ -77,6 +98,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       subtitle: 'Gestión manual de asignaciones. ${filtered.length} registros.',
       scrollable: false,
       child: Column(children: [
+        // Barra de Filtros
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -89,7 +111,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               onChanged: (v) => setState(() => _searchQuery = v),
               style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
               decoration: InputDecoration(
-                hintText: 'Buscar por nombre o matrícula...',
+                hintText: 'Buscar por nombre, matrícula o cuenta...',
                 hintStyle: const TextStyle(color: AppTheme.textSecondary),
                 prefixIcon: const Icon(Icons.search_rounded, color: AppTheme.textSecondary, size: 20),
                 filled: true,
@@ -151,6 +173,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
 
         const SizedBox(height: 16),
 
+        // Cabecera de la Tabla
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
@@ -159,14 +182,16 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
             border: Border.all(color: AppTheme.border),
           ),
           child: const Row(children: [
-            Expanded(flex: 2, child: _TableHeader('Alumno / Matrícula')),
-            Expanded(flex: 2, child: _TableHeader('Carrera')),
-            Expanded(flex: 3, child: _TableHeader('Tutor Asignado')),
-            Expanded(flex: 2, child: _TableHeader('Tipo / Movilidad')),
-            SizedBox(width: 120, child: _TableHeader('Acción')),
+            Expanded(flex: 3, child: _TableHeader('Alumno (ID / Cuenta)')),
+            Expanded(flex: 2, child: _TableHeader('Académico')),
+            Expanded(flex: 3, child: _TableHeader('Tutor (Estado)')),
+            Expanded(flex: 2, child: _TableHeader('Movilidad')),
+            Expanded(flex: 1, child: _TableHeader('Estado')),
+            SizedBox(width: 120, child: _TableHeader('Acciones', alignRight: true)),
           ]),
         ),
 
+        // Cuerpo de la Tabla
         Expanded(child: Container(
           decoration: BoxDecoration(
             color: AppTheme.surface,
@@ -188,107 +213,86 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
 
               return Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                color: s.wasReassigned ? AppTheme.yellow.withValues(alpha:0.04) : Colors.transparent,
+                color: s.wasReassigned ? AppTheme.yellow.withOpacity(0.04) : Colors.transparent,
                 child: Row(children: [
-                  Expanded(flex: 2, child: Column(
+                  
+                  // COLUMNA 1: Alumno (Nombre, ID, Cuenta)
+                  Expanded(flex: 3, child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(children: [
-                        Text(s.name, style: const TextStyle(
-                          color: AppTheme.textPrimary, fontWeight: FontWeight.w500, fontSize: 13,
-                        )),
-                        if (s.wasReassigned) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppTheme.yellow.withValues(alpha:0.2),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text('Movido', style: TextStyle(
-                              color: AppTheme.yellow, fontSize: 9, fontWeight: FontWeight.w700,
-                            )),
-                          ),
-                        ],
-                      ]),
-                      Text(s.id, style: const TextStyle(
+                      Text(s.name, style: const TextStyle(
+                        color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 13,
+                      )),
+                      const SizedBox(height: 2),
+                      Text('${s.id} • Cta: ${s.accountNumber}', style: const TextStyle(
                         color: AppTheme.textSecondary, fontSize: 11,
                       )),
                     ],
                   )),
-                  Expanded(flex: 2, child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppTheme.accent.withValues(alpha:0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(s.career, style: const TextStyle(
-                      color: AppTheme.accentLight, fontSize: 12,
-                    )),
+
+                  // COLUMNA 2: Académico (Carrera, Periodo)
+                  Expanded(flex: 2, child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent.withOpacity(0.1), 
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(s.career, style: const TextStyle(
+                          color: AppTheme.accentLight, fontSize: 10, fontWeight: FontWeight.bold,
+                        )),
+                      ),
+                      const SizedBox(height: 4),
+                      Text('Ingreso: ${s.entryPeriod}', style: const TextStyle(
+                        color: AppTheme.textSecondary, fontSize: 10,
+                      )),
+                    ],
                   )),
-                  
-                  // AQUI OCURRIÓ EL ERROR: Aseguramos cerrar correctamente Expanded > Row > ...
+
+                  // COLUMNA 3: Tutor y Estado
                   Expanded(flex: 3, child: Row(children: [
                     Container(
                       width: 28, height: 28,
                       decoration: BoxDecoration(
-                        color: AppTheme.statusColor(tutor.status).withValues(alpha:0.15),
+                        color: AppTheme.statusColor(tutor.status).withOpacity(0.15), 
                         shape: BoxShape.circle,
                       ),
                       child: Center(child: Text(
-                        tutor.name.split(' ').last[0],
-                        style: TextStyle(
-                          color: AppTheme.statusColor(tutor.status),
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
+                        tutor.name.split(' ').last[0], 
+                        style: TextStyle(color: AppTheme.statusColor(tutor.status), fontWeight: FontWeight.w700, fontSize: 12),
                       )),
                     ),
                     const SizedBox(width: 8),
                     Expanded(child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Text(tutor.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12), overflow: TextOverflow.ellipsis),
                         Row(children: [
-                          Expanded(
-                            child: Text(tutor.name, style: const TextStyle(
-                              color: AppTheme.textPrimary, fontSize: 12,
-                            ), overflow: TextOverflow.ellipsis),
-                          ),
-                          // Badge de Estado del Tutor
-                          Container(
-                            margin: const EdgeInsets.only(left: 6),
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: tutor.isActive ? AppTheme.green.withValues(alpha:0.15) : AppTheme.red.withValues(alpha:0.15),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: tutor.isActive ? AppTheme.green.withValues(alpha:0.3) : AppTheme.red.withValues(alpha:0.3)),
-                            ),
-                            child: Text(tutor.isActive ? 'Activo' : 'Baja', style: TextStyle(
-                              color: tutor.isActive ? AppTheme.green : AppTheme.red,
-                              fontSize: 8, fontWeight: FontWeight.w700,
-                            )),
-                          ),
+                          Text('${tutor.count} alumnos • ', style: TextStyle(color: AppTheme.statusColor(tutor.status), fontSize: 10)),
+                          Text(tutor.isActive ? 'Activo' : 'Baja', style: TextStyle(
+                            color: tutor.isActive ? AppTheme.green : AppTheme.red, 
+                            fontSize: 10, fontWeight: FontWeight.bold,
+                          )),
                         ]),
-                        Text('${tutor.count} alumnos', style: TextStyle(
-                          color: AppTheme.statusColor(tutor.status), fontSize: 10,
-                        )),
                       ],
                     )),
-                  ])), // <--- ESTOS CIERRES FALTABAN: ] para Row, ) para flex, ) para Expanded
+                  ])),
 
+                  // COLUMNA 4: Movilidad
                   Expanded(flex: 2, child: Row(children: [
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: mobilityColor.withValues(alpha:0.1),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: mobilityColor.withValues(alpha:0.3)),
+                        color: mobilityColor.withOpacity(0.1), 
+                        borderRadius: BorderRadius.circular(6), 
+                        border: Border.all(color: mobilityColor.withOpacity(0.3)),
                       ),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Icon(
-                          isLocked ? Icons.lock_rounded : (s.mobility == MobilityFlag.newStudent ? Icons.fiber_new_rounded : Icons.swap_horiz_rounded),
-                          size: 11,
-                          color: mobilityColor,
+                          isLocked ? Icons.lock_rounded : (s.mobility == MobilityFlag.newStudent ? Icons.fiber_new_rounded : Icons.swap_horiz_rounded), 
+                          size: 11, color: mobilityColor,
                         ),
                         const SizedBox(width: 4),
                         Text(AppTheme.mobilityLabel(s.mobility), style: TextStyle(
@@ -297,36 +301,63 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                       ]),
                     ),
                   ])),
-                  SizedBox(width: 120, child: isLocked
-                    ? Tooltip(
-                        message: 'Este alumno no puede ser reasignado',
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+
+                  // COLUMNA 5: Indicador de Estado (M / C)
+                  Expanded(flex: 1, child: Row(children: [
+                    s.wasReassigned 
+                      ? Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                           decoration: BoxDecoration(
-                            color: AppTheme.border,
-                            borderRadius: BorderRadius.circular(8),
+                            color: AppTheme.yellow.withOpacity(0.2), 
+                            borderRadius: BorderRadius.circular(6),
                           ),
                           child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(Icons.lock_rounded, size: 13, color: AppTheme.textSecondary),
+                            Text('C', style: TextStyle(color: AppTheme.yellow, fontWeight: FontWeight.w800, fontSize: 12)),
                             SizedBox(width: 4),
-                            Text('Bloqueado', style: TextStyle(
-                              color: AppTheme.textSecondary, fontSize: 11,
-                            )),
+                            Icon(Icons.cached_rounded, color: AppTheme.yellow, size: 12),
                           ]),
+                        )
+                      : Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppTheme.green.withOpacity(0.15), 
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text('M', style: TextStyle(color: AppTheme.green, fontWeight: FontWeight.w800, fontSize: 12)),
                         ),
-                      )
-                    : TextButton.icon(
-                        onPressed: () => _showReassignDialog(s),
-                        icon: const Icon(Icons.swap_horiz_rounded, size: 14),
-                        label: const Text('Reasignar', style: TextStyle(fontSize: 11)),
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppTheme.accent,
-                          backgroundColor: AppTheme.accent.withValues(alpha:0.1),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        ),
+                  ])),
+
+                  // COLUMNA 6: Acciones
+                  SizedBox(width: 120, child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      isLocked
+                        ? const Tooltip(
+                            message: 'Alumno bloqueado',
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 10),
+                              child: Icon(Icons.lock_rounded, size: 16, color: AppTheme.textSecondary),
+                            ),
+                          )
+                        : IconButton(
+                            onPressed: () => _showReassignDialog(s),
+                            icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                            color: AppTheme.accent,
+                            tooltip: 'Reasignar',
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.all(8),
+                          ),
+                      
+                      IconButton(
+                        onPressed: () => _showEditDialog(s),
+                        icon: const Icon(Icons.edit_rounded, size: 16),
+                        color: const Color(0xFF3498DB),
+                        tooltip: 'Editar',
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.all(8),
                       ),
-                  ),
+                    ],
+                  )),
                 ]),
               );
             },
@@ -339,14 +370,20 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
 
 class _TableHeader extends StatelessWidget {
   final String label;
-  const _TableHeader(this.label);
+  final bool alignRight;
+  const _TableHeader(this.label, {this.alignRight = false});
+  
   @override
-  Widget build(BuildContext context) => Text(label, style: const TextStyle(
-    color: AppTheme.textSecondary,
-    fontSize: 11,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.5,
-  ));
+  Widget build(BuildContext context) => Text(
+    label, 
+    textAlign: alignRight ? TextAlign.right : TextAlign.left,
+    style: const TextStyle(
+      color: AppTheme.textSecondary,
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.5,
+    )
+  );
 }
 
 class _DropdownFilter<T> extends StatelessWidget {
@@ -414,7 +451,7 @@ class _ReassignDialog extends StatelessWidget {
               Container(
                 width: 40, height: 40,
                 decoration: BoxDecoration(
-                  color: AppTheme.accent.withValues(alpha:0.15),
+                  color: AppTheme.accent.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(Icons.swap_horiz_rounded, color: AppTheme.accent, size: 22),
@@ -487,13 +524,13 @@ class _ReassignDialog extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: AppTheme.surfaceLight,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: color.withValues(alpha:0.3)),
+                      border: Border.all(color: color.withOpacity(0.3)),
                     ),
                     child: Row(children: [
                       Container(
                         width: 36, height: 36,
                         decoration: BoxDecoration(
-                          color: color.withValues(alpha:0.15),
+                          color: color.withOpacity(0.15),
                           shape: BoxShape.circle,
                         ),
                         child: Center(child: Text(t.name.split(' ').last[0], style: TextStyle(
@@ -517,7 +554,7 @@ class _ReassignDialog extends StatelessWidget {
                           color: color, fontSize: 20, fontWeight: FontWeight.w800,
                         )),
                         Text(spotsLeft > 0 ? '+$spotsLeft espacios' : 'lleno', style: TextStyle(
-                          color: color.withValues(alpha:0.7), fontSize: 10,
+                          color: color.withOpacity(0.7), fontSize: 10,
                         )),
                       ]),
                       const SizedBox(width: 10),
@@ -529,6 +566,99 @@ class _ReassignDialog extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _EditStudentDialog extends StatefulWidget {
+  final Student student;
+  final List<Tutor> tutors;
+  final Function(String, MobilityFlag, String) onSave;
+
+  const _EditStudentDialog({
+    required this.student,
+    required this.tutors,
+    required this.onSave,
+  });
+
+  @override
+  State<_EditStudentDialog> createState() => _EditStudentDialogState();
+}
+
+class _EditStudentDialogState extends State<_EditStudentDialog> {
+  late String _selectedCareer;
+  late MobilityFlag _selectedMobility;
+  late String _selectedTutorId;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedCareer = widget.student.career;
+    _selectedMobility = widget.student.mobility;
+    _selectedTutorId = widget.student.tutorId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppTheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text('Editar Alumno: ${widget.student.name}', style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              value: _selectedCareer,
+              decoration: _inputDeco('Carrera'),
+              dropdownColor: AppTheme.surfaceLight,
+              items: ['Computación', 'IA', 'Robótica'].map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(color: AppTheme.textPrimary)))).toList(),
+              onChanged: (v) => setState(() => _selectedCareer = v!),
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<MobilityFlag>(
+              value: _selectedMobility,
+              decoration: _inputDeco('Movilidad'),
+              dropdownColor: AppTheme.surfaceLight,
+              items: MobilityFlag.values.map((m) => DropdownMenuItem(value: m, child: Text(AppTheme.mobilityLabel(m), style: const TextStyle(color: AppTheme.textPrimary)))).toList(),
+              onChanged: (v) => setState(() => _selectedMobility = v!),
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              value: _selectedTutorId,
+              decoration: _inputDeco('Tutor Asignado'),
+              dropdownColor: AppTheme.surfaceLight,
+              items: widget.tutors.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name, style: const TextStyle(color: AppTheme.textPrimary)))).toList(),
+              onChanged: (v) => setState(() => _selectedTutorId = v!),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar', style: TextStyle(color: AppTheme.textSecondary)),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent),
+          onPressed: () {
+            widget.onSave(_selectedCareer, _selectedMobility, _selectedTutorId);
+            Navigator.pop(context);
+          },
+          child: const Text('Guardar Cambios', style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    );
+  }
+
+  InputDecoration _inputDeco(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: AppTheme.textSecondary),
+      filled: true,
+      fillColor: AppTheme.bg,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
     );
   }
 }

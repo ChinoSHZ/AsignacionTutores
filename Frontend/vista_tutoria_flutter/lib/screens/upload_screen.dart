@@ -11,6 +11,7 @@ class UploadScreen extends StatefulWidget {
 class _UploadScreenState extends State<UploadScreen> {
   bool _file1Loaded = false;
   bool _file2Loaded = false;
+  bool _file3Loaded = false; // <-- TERCER EXCEL
 
   @override
   Widget build(BuildContext context) {
@@ -24,25 +25,34 @@ class _UploadScreenState extends State<UploadScreen> {
             children: [
               Expanded(child: _FileDropZone(
                 label: 'Nuevos Ingresos',
-                subtitle: 'Excel con alumnos de primer ingreso',
+                subtitle: 'Alumnos de primer ingreso',
                 icon: Icons.person_add_rounded,
                 color: AppTheme.green,
                 isLoaded: _file1Loaded,
                 onLoad: () => setState(() => _file1Loaded = true),
               )),
-              const SizedBox(width: 20),
+              const SizedBox(width: 16),
               Expanded(child: _FileDropZone(
                 label: 'Registro Histórico',
-                subtitle: 'Excel con reingresantes y atributos de movilidad',
+                subtitle: 'Reingresantes y movilidad',
                 icon: Icons.history_edu_rounded,
                 color: const Color(0xFF3498DB),
                 isLoaded: _file2Loaded,
                 onLoad: () => setState(() => _file2Loaded = true),
               )),
+              const SizedBox(width: 16),
+              Expanded(child: _FileDropZone(
+                label: 'Propuesta Semestre',
+                subtitle: 'Excel con la propuesta',
+                icon: Icons.description_rounded,
+                color: AppTheme.yellow,
+                isLoaded: _file3Loaded,
+                onLoad: () => setState(() => _file3Loaded = true),
+              )),
             ],
           ),
           const SizedBox(height: 28),
-          if (_file1Loaded && _file2Loaded) ...[
+          if (_file1Loaded && _file2Loaded && _file3Loaded) ...[ // Solo avanza si los 3 están cargados
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -54,7 +64,7 @@ class _UploadScreenState extends State<UploadScreen> {
                 Container(
                   width: 44, height: 44,
                   decoration: BoxDecoration(
-                    color: AppTheme.green.withValues(alpha:0.15),
+                    color: AppTheme.green.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(Icons.check_circle_rounded, color: AppTheme.green),
@@ -64,11 +74,9 @@ class _UploadScreenState extends State<UploadScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Archivos listos', style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
+                      color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 15,
                     )),
-                    Text('155 registros cargados. Puedes proceder con el algoritmo.', style: TextStyle(
+                    Text('Todos los archivos requeridos están cargados. Proceder con el algoritmo.', style: TextStyle(
                       color: AppTheme.textSecondary, fontSize: 13,
                     )),
                   ],
@@ -78,8 +86,7 @@ class _UploadScreenState extends State<UploadScreen> {
                   icon: const Icon(Icons.play_arrow_rounded, size: 18),
                   label: const Text('Iniciar Algoritmo'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.accent,
-                    foregroundColor: Colors.white,
+                    backgroundColor: AppTheme.accent, foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),

@@ -24,9 +24,9 @@ class AppTheme {
 
   static Color mobilityColor(MobilityFlag f) {
     switch (f) {
-      case MobilityFlag.canChange: return const Color(0xFF3498DB);
-      case MobilityFlag.noChange: return red;
-      case MobilityFlag.newStudent: return green;
+      case MobilityFlag.canChange: return green; // Verde
+      case MobilityFlag.noChange: return red;    // Rojo
+      case MobilityFlag.newStudent: return const Color(0xFF3498DB); // Azul
     }
   }
 

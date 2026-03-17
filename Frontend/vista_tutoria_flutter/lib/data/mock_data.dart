@@ -1,11 +1,11 @@
 import '../models/models.dart';
 
 final List<Tutor> mockTutors = [
-  Tutor(id: 't1', name: 'Dr. Ana García', department: 'Sistemas', careers: ['Computación', 'IA'], email: 'ana.garcia@inst.edu', hasAI: true, isActive: true),
-  Tutor(id: 't2', name: 'Ing. Luis Mendoza', department: 'Sistemas', careers: ['Computación'], email: 'luis.mendoza@inst.edu', hasAI: false, isActive: true),
-  Tutor(id: 't3', name: 'Dra. Carmen Ríos', department: 'IA', careers: ['IA', 'Robótica'], email: 'carmen.rios@inst.edu', hasAI: true, isActive: false), // Simulamos una baja
-  Tutor(id: 't4', name: 'Dr. Pablo Torres', department: 'Sistemas', careers: ['Computación', 'Robótica'], email: 'pablo.torres@inst.edu', hasAI: false, isActive: true),
-  Tutor(id: 't5', name: 'Ing. Sofía Vargas', department: 'IA', careers: ['IA'], email: 'sofia.vargas@inst.edu', hasAI: true, isActive: true),
+  Tutor(id: 't1', name: 'Dr. Ana García', department: 'Sistemas', careers: ['Computación', 'IA'], isActive: true),
+  Tutor(id: 't2', name: 'Ing. Luis Mendoza', department: 'Sistemas', careers: ['Computación'], isActive: false), // Simulamos uno de baja
+  Tutor(id: 't3', name: 'Dra. Carmen Ríos', department: 'IA', careers: ['IA', 'Robótica'], isActive: true),
+  Tutor(id: 't4', name: 'Dr. Pablo Torres', department: 'Sistemas', careers: ['Computación', 'Robótica'], isActive: true),
+  Tutor(id: 't5', name: 'Ing. Sofía Vargas', department: 'IA', careers: ['IA'], isActive: true),
 ];
 
 final List<Student> mockStudents = List.generate(155, (i) {
@@ -18,9 +18,16 @@ final List<Student> mockStudents = List.generate(155, (i) {
       : MobilityFlag.newStudent;
   
   final tutorIndex = i % 5;
+  
+  // Generamos un número de cuenta ficticio de 7 dígitos y un periodo (A o B)
+  final account = '31${(50000 + i).toString().padLeft(5, '0')}'; 
+  final period = '202${3 + (i % 2)}${i % 2 == 0 ? 'A' : 'B'}';
+
   return Student(
     id: 'A${(1000 + i).toString()}',
     name: 'Alumno ${i + 1}',
+    accountNumber: account,
+    entryPeriod: period,
     career: careers[i % 3],
     isReentry: isReentry,
     mobility: mobility,
