@@ -51,12 +51,13 @@ class Student {
   final String name;
   final String accountNumber; 
   final String entryPeriod;   
-  String career;              // Almacenará la abreviatura (ej. 'ICO')
+  String career;              
   final bool isReentry;
   MobilityFlag mobility;      
   String tutorId;
   String? previousTutorId;
   bool wasReassigned;
+  bool isActive; // <-- NUEVO ATRIBUTO
 
   Student({
     required this.id,
@@ -69,6 +70,7 @@ class Student {
     required this.tutorId,
     this.previousTutorId,
     this.wasReassigned = false,
+    this.isActive = true, // <-- POR DEFECTO ACTIVO
   });
 }
 
