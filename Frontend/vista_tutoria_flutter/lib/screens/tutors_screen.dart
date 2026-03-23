@@ -5,7 +5,8 @@ import '../widgets/screen_wrapper.dart';
 
 class TutorsScreen extends StatefulWidget {
   final List<Tutor> tutors;
-  const TutorsScreen({super.key, required this.tutors});
+  final List<Career> careers; // <-- Recibe el catálogo dinámico de carreras
+  const TutorsScreen({super.key, required this.tutors, required this.careers});
 
   @override
   State<TutorsScreen> createState() => _TutorsScreenState();
@@ -32,6 +33,7 @@ class _TutorsScreenState extends State<TutorsScreen> {
       context: context,
       builder: (_) => _TutorDialog(
         tutor: tutor,
+        careersCatalog: widget.careers, // <-- Pasamos el catálogo al modal
         onSave: (id, name, email, career, hasAI, isActive) {
           setState(() {
             if (tutor == null) {
@@ -44,7 +46,7 @@ class _TutorsScreenState extends State<TutorsScreen> {
               // Editar existente
               tutor.email = email;
               if (!tutor.careers.contains(career)) {
-                tutor.careers[0] = career; // Simplificación para el ejemplo
+                tutor.careers[0] = career; // Actualizamos su carrera principal
               }
               tutor.hasAI = hasAI;
               tutor.isActive = isActive;
@@ -58,9 +60,9 @@ class _TutorsScreenState extends State<TutorsScreen> {
   @override
   Widget build(BuildContext context) {
     final filtered = _filteredTutors;
-    final Set<String> allCareers = {};
-    for (var t in widget.tutors) { allCareers.addAll(t.careers); }
-    final careers = ['Todas', ...allCareers.toList()..sort()];
+    
+    // Construimos las opciones del filtro dinámicamente con las abreviaturas del catálogo
+    final careerOptions = ['Todas', ...widget.careers.map((c) => c.abbreviation).toList()..sort()];
 
     return ScreenWrapper(
       title: 'Gestión de Tutores',
@@ -110,7 +112,7 @@ class _TutorsScreenState extends State<TutorsScreen> {
               const Text('Filtros:', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
               const SizedBox(width: 12),
               Expanded(child: _DropdownFilter<String>(
-                label: 'Carrera', value: _filterCareer, options: careers,
+                label: 'Carrera', value: _filterCareer, options: careerOptions,
                 onChanged: (v) => setState(() => _filterCareer = v ?? 'Todas'),
               )),
               const SizedBox(width: 10),
@@ -159,7 +161,7 @@ class _TutorsScreenState extends State<TutorsScreen> {
               final t = filtered[i];
               return Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                color: !t.isActive ? AppTheme.red.withValues(alpha:0.02) : Colors.transparent,
+                color: !t.isActive ? AppTheme.red.withOpacity(0.02) : Colors.transparent,
                 child: Row(children: [
                   SizedBox(width: 60, child: Text(t.id, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12))),
                   Expanded(flex: 2, child: Column(
@@ -173,7 +175,7 @@ class _TutorsScreenState extends State<TutorsScreen> {
                     spacing: 4, runSpacing: 4,
                     children: t.careers.map((c) => Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: AppTheme.accent.withValues(alpha:0.1), borderRadius: BorderRadius.circular(4)),
+                      decoration: BoxDecoration(color: AppTheme.accent.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
                       child: Text(c, style: const TextStyle(color: AppTheme.accentLight, fontSize: 10)),
                     )).toList(),
                   )),
@@ -185,9 +187,9 @@ class _TutorsScreenState extends State<TutorsScreen> {
                   SizedBox(width: 100, child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: t.isActive ? AppTheme.green.withValues(alpha:0.1) : AppTheme.red.withValues(alpha:0.1),
+                      color: t.isActive ? AppTheme.green.withOpacity(0.1) : AppTheme.red.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: t.isActive ? AppTheme.green.withValues(alpha:0.3) : AppTheme.red.withValues(alpha:0.3)),
+                      border: Border.all(color: t.isActive ? AppTheme.green.withOpacity(0.3) : AppTheme.red.withOpacity(0.3)),
                     ),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       Container(width: 6, height: 6, decoration: BoxDecoration(color: t.isActive ? AppTheme.green : AppTheme.red, shape: BoxShape.circle)),
@@ -247,16 +249,18 @@ class _DropdownFilter<T> extends StatelessWidget {
 // MODAL DE ALTA / EDICIÓN DE TUTOR
 class _TutorDialog extends StatefulWidget {
   final Tutor? tutor;
+  final List<Career> careersCatalog; // <-- Recibe el catálogo dinámico
   final Function(String id, String name, String email, String career, bool hasAI, bool isActive) onSave;
 
-  const _TutorDialog({this.tutor, required this.onSave});
+  const _TutorDialog({this.tutor, required this.careersCatalog, required this.onSave});
 
   @override
   State<_TutorDialog> createState() => _TutorDialogState();
 }
 
 class _TutorDialogState extends State<_TutorDialog> {
-  late TextEditingController _idCtrl, _nameCtrl, _emailCtrl, _careerCtrl;
+  late TextEditingController _idCtrl, _nameCtrl, _emailCtrl;
+  late String _selectedCareer;
   late bool _hasAI, _isActive;
 
   @override
@@ -266,7 +270,12 @@ class _TutorDialogState extends State<_TutorDialog> {
     _idCtrl = TextEditingController(text: t?.id ?? 't${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}');
     _nameCtrl = TextEditingController(text: t?.name ?? '');
     _emailCtrl = TextEditingController(text: t?.email ?? '');
-    _careerCtrl = TextEditingController(text: t?.careers.isNotEmpty == true ? t!.careers.first : '');
+    
+    // Seleccionamos la carrera inicial desde el catálogo
+    _selectedCareer = (t != null && t.careers.isNotEmpty) 
+        ? t.careers.first 
+        : (widget.careersCatalog.isNotEmpty ? widget.careersCatalog.first.abbreviation : '');
+
     _hasAI = t?.hasAI ?? false;
     _isActive = t?.isActive ?? true;
   }
@@ -290,7 +299,19 @@ class _TutorDialogState extends State<_TutorDialog> {
             if (!isEdit) const SizedBox(height: 12),
             _buildField('Correo Institucional', _emailCtrl),
             const SizedBox(height: 12),
-            _buildField('Carrera Principal', _careerCtrl),
+            
+            // Dropdown en lugar de TextField para seleccionar la carrera
+            DropdownButtonFormField<String>(
+              value: _selectedCareer.isEmpty ? null : _selectedCareer,
+              decoration: _inputDeco('Carrera Principal'),
+              dropdownColor: AppTheme.surfaceLight,
+              items: widget.careersCatalog.map((c) => DropdownMenuItem(
+                value: c.abbreviation, 
+                child: Text(c.abbreviation, style: const TextStyle(color: AppTheme.textPrimary))
+              )).toList(),
+              onChanged: (v) => setState(() => _selectedCareer = v!),
+            ),
+
             const SizedBox(height: 16),
             SwitchListTile(
               title: const Text('IA Asignada', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
@@ -302,7 +323,7 @@ class _TutorDialogState extends State<_TutorDialog> {
             SwitchListTile(
               title: const Text('Estado', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
               subtitle: Text(_isActive ? 'Activo (Participa)' : 'Baja (Inactivo)', style: TextStyle(color: _isActive ? AppTheme.green : AppTheme.red, fontSize: 11)),
-              value: _isActive, activeColor: AppTheme.green, inactiveTrackColor: AppTheme.red.withValues(alpha:0.3),
+              value: _isActive, activeColor: AppTheme.green, inactiveTrackColor: AppTheme.red.withOpacity(0.3),
               onChanged: (v) => setState(() => _isActive = v),
               contentPadding: EdgeInsets.zero,
             ),
@@ -313,7 +334,7 @@ class _TutorDialogState extends State<_TutorDialog> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent, foregroundColor: Colors.white),
                 onPressed: () {
-                  widget.onSave(_idCtrl.text, _nameCtrl.text, _emailCtrl.text, _careerCtrl.text, _hasAI, _isActive);
+                  widget.onSave(_idCtrl.text, _nameCtrl.text, _emailCtrl.text, _selectedCareer, _hasAI, _isActive);
                   Navigator.pop(context);
                 },
                 child: const Text('Guardar'),
@@ -334,6 +355,15 @@ class _TutorDialogState extends State<_TutorDialog> {
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       ),
+    );
+  }
+
+  InputDecoration _inputDeco(String label) {
+    return InputDecoration(
+      labelText: label, labelStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+      filled: true, fillColor: AppTheme.bg,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     );
   }
 }

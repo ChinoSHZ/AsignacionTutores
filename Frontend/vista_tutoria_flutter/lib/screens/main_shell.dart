@@ -5,9 +5,10 @@ import '../data/mock_data.dart';
 import 'upload_screen.dart';
 import 'processing_screen.dart';
 import 'dashboard_screen.dart';
+import 'careers_screen.dart';
+import 'tutors_screen.dart';
 import 'assignments_screen.dart';
 import 'logs_screen.dart';
-import 'tutors_screen.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -18,15 +19,20 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   Screen _current = Screen.dashboard;
+  
+  // Estado global de la aplicación
   final List<Tutor> tutors = mockTutors;
   final List<Student> students = mockStudents;
+  final List<Career> careers = mockCareers;
 
   @override
   void initState() {
     super.initState();
+    // Poblamos los tutores con sus alumnos correspondientes
     for (final t in tutors) {
       t.students = students.where((s) => s.tutorId == t.id).toList();
     }
+    // Ajustes manuales para crear escenarios interesantes en el Dashboard
     tutors[0].students = students.where((s) => s.tutorId == 't1').take(30).toList();
     tutors[1].students = students.where((s) => s.tutorId == 't2').take(28).toList() 
         + students.where((s) => s.tutorId == 't3').take(3).toList();
@@ -60,13 +66,25 @@ class _MainShellState extends State<MainShell> {
 
   Widget _buildScreen() {
     switch (_current) {
-      case Screen.upload: return const UploadScreen();
-      case Screen.processing: return const ProcessingScreen();
-      case Screen.dashboard: return DashboardScreen(tutors: tutors);
-      // NUEVO: Agregamos el case para la pantalla de Tutores
-      case Screen.tutors: return TutorsScreen(tutors: tutors);
-      case Screen.assignments: return AssignmentsScreen(tutors: tutors, students: students, onReassign: _reassign);
-      case Screen.logs: return LogsScreen(logs: mockLogs);
+      case Screen.upload: 
+        return const UploadScreen();
+      case Screen.processing: 
+        return const ProcessingScreen();
+      case Screen.dashboard: 
+        return DashboardScreen(tutors: tutors);
+      case Screen.careers: 
+        return CareersScreen(careers: careers); 
+      case Screen.tutors: 
+        return TutorsScreen(tutors: tutors, careers: careers); 
+      case Screen.assignments: 
+        return AssignmentsScreen(
+          tutors: tutors, 
+          students: students, 
+          careers: careers, 
+          onReassign: _reassign
+        ); 
+      case Screen.logs: 
+        return LogsScreen(logs: mockLogs);
     }
   }
 }
@@ -83,7 +101,7 @@ class _Sidebar extends StatelessWidget {
       (Screen.upload, Icons.upload_file_rounded, 'Cargar Datos'),
       (Screen.processing, Icons.auto_fix_high_rounded, 'Procesamiento'),
       (Screen.dashboard, Icons.dashboard_rounded, 'Dashboard'),
-      // NUEVO: Agregamos el ítem al menú
+      (Screen.careers, Icons.book_rounded, 'Carreras'),
       (Screen.tutors, Icons.badge_rounded, 'Tutores'),
       (Screen.assignments, Icons.people_alt_rounded, 'Asignaciones'),
       (Screen.logs, Icons.history_rounded, 'Registro'),
@@ -133,7 +151,7 @@ class _Sidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text('NAVEGACIÓN', style: TextStyle(
-              color: AppTheme.textSecondary.withValues(alpha:0.6),
+              color: AppTheme.textSecondary.withValues(alpha: 0.6),
               fontSize: 10,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.5,
@@ -154,9 +172,9 @@ class _Sidebar extends StatelessWidget {
             margin: const EdgeInsets.all(16),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppTheme.accent.withValues(alpha:0.1),
+              color: AppTheme.accent.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.accent.withValues(alpha:0.2)),
+              border: Border.all(color: AppTheme.accent.withValues(alpha: 0.2)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -207,9 +225,9 @@ class _SidebarItem extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: isActive ? AppTheme.accent.withValues(alpha:0.15) : Colors.transparent,
+          color: isActive ? AppTheme.accent.withValues(alpha: 0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-          border: isActive ? Border.all(color: AppTheme.accent.withValues(alpha:0.3)) : null,
+          border: isActive ? Border.all(color: AppTheme.accent.withValues(alpha: 0.3)) : null,
         ),
         child: Row(
           children: [

@@ -2,25 +2,37 @@ import 'package:flutter/material.dart';
 
 enum BalanceStatus { balanced, warning, critical }
 enum MobilityFlag { canChange, noChange, newStudent }
-enum Screen { upload, processing, dashboard, tutors, assignments, logs }
+enum Screen { upload, processing, dashboard, careers, tutors, assignments, logs }
+
+class Career {
+  final String id;
+  String abbreviation;
+  String name;
+
+  Career({
+    required this.id,
+    required this.abbreviation,
+    required this.name,
+  });
+}
 
 class Tutor {
   final String id;
   final String name;
   final String department;
-  final List<String> careers;
-  String email;       // <-- NUEVO (Sin final para poder editarlo)
-  bool hasAI;         // <-- NUEVO (Sin final)
-  bool isActive;      // <-- MODIFICADO (Le quitamos el final para poder editarlo)
+  final List<String> careers; // Ahora almacenará las abreviaturas (ej. ['ICO', 'IIA'])
+  String email;       
+  bool hasAI;         
+  bool isActive;      
   List<Student> students;
 
-  Tutor({
+Tutor({
     required this.id,
     required this.name,
     required this.department,
     required this.careers,
-    this.email = '',    // <-- Valor por defecto
-    this.hasAI = false, // <-- Valor por defecto
+    this.email = '',    
+    this.hasAI = false, 
     this.isActive = true,
     List<Student>? students,
   }) : students = students ?? [];
@@ -37,11 +49,11 @@ class Tutor {
 class Student {
   final String id;
   final String name;
-  final String accountNumber; // <-- NUEVO ATRIBUTO
-  final String entryPeriod;   // <-- NUEVO ATRIBUTO
-  String career;              // <-- Modificable para edición
+  final String accountNumber; 
+  final String entryPeriod;   
+  String career;              // Almacenará la abreviatura (ej. 'ICO')
   final bool isReentry;
-  MobilityFlag mobility;      // <-- Modificable para edición
+  MobilityFlag mobility;      
   String tutorId;
   String? previousTutorId;
   bool wasReassigned;

@@ -6,12 +6,14 @@ import '../widgets/screen_wrapper.dart';
 class AssignmentsScreen extends StatefulWidget {
   final List<Tutor> tutors;
   final List<Student> students;
+  final List<Career> careers; // Recibe el catálogo global
   final void Function(Student, String) onReassign;
 
   const AssignmentsScreen({
     super.key,
     required this.tutors,
     required this.students,
+    required this.careers,
     required this.onReassign,
   });
 
@@ -64,6 +66,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       builder: (_) => _EditStudentDialog(
         student: student,
         tutors: widget.tutors,
+        careersCatalog: widget.careers, // Pasa el catálogo al modal
         onSave: (String career, MobilityFlag mobility, String tutorId) {
           setState(() {
             student.career = career;
@@ -80,10 +83,11 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
   @override
   Widget build(BuildContext context) {
     final filtered = _filtered;
-    final careers = ['Todas', ...{...widget.students.map((s) => s.career)}];
+    // Opciones del filtro usando las abreviaturas dinámicas del catálogo
+    final careerOptions = ['Todas', ...widget.careers.map((c) => c.abbreviation)];
     final mobilities = ['Todas', 'Nuevo Ingreso', 'Sí Cambiar', 'No Cambiar'];
     
-    // Filtro dependiente para tutores
+    // Filtro dependiente para tutores basado en la carrera seleccionada
     final availableTutorsForFilter = _filterCareer == 'Todas'
         ? widget.tutors 
         : widget.tutors.where((t) => t.careers.contains(_filterCareer)).toList(); 
@@ -130,7 +134,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               Expanded(child: _DropdownFilter<String>(
                 label: 'Carrera',
                 value: _filterCareer,
-                options: careers,
+                options: careerOptions, // Usamos las opciones dinámicas
                 onChanged: (v) {
                   setState(() {
                     _filterCareer = v ?? 'Todas';
@@ -573,11 +577,13 @@ class _ReassignDialog extends StatelessWidget {
 class _EditStudentDialog extends StatefulWidget {
   final Student student;
   final List<Tutor> tutors;
+  final List<Career> careersCatalog; // Recibe el catálogo global
   final Function(String, MobilityFlag, String) onSave;
 
   const _EditStudentDialog({
     required this.student,
     required this.tutors,
+    required this.careersCatalog,
     required this.onSave,
   });
 
@@ -593,7 +599,12 @@ class _EditStudentDialogState extends State<_EditStudentDialog> {
   @override
   void initState() {
     super.initState();
-    _selectedCareer = widget.student.career;
+    // Validamos que la carrera del estudiante exista en el catálogo, sino le asignamos la primera disponible por seguridad
+    final careerExists = widget.careersCatalog.any((c) => c.abbreviation == widget.student.career);
+    _selectedCareer = careerExists 
+        ? widget.student.career 
+        : (widget.careersCatalog.isNotEmpty ? widget.careersCatalog.first.abbreviation : '');
+
     _selectedMobility = widget.student.mobility;
     _selectedTutorId = widget.student.tutorId;
   }
@@ -610,10 +621,14 @@ class _EditStudentDialogState extends State<_EditStudentDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             DropdownButtonFormField<String>(
-              value: _selectedCareer,
+              value: _selectedCareer.isEmpty ? null : _selectedCareer,
               decoration: _inputDeco('Carrera'),
               dropdownColor: AppTheme.surfaceLight,
-              items: ['Computación', 'IA', 'Robótica'].map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(color: AppTheme.textPrimary)))).toList(),
+              // Aquí generamos las opciones basadas en el catálogo real
+              items: widget.careersCatalog.map((c) => DropdownMenuItem(
+                value: c.abbreviation, 
+                child: Text(c.abbreviation, style: const TextStyle(color: AppTheme.textPrimary))
+              )).toList(),
               onChanged: (v) => setState(() => _selectedCareer = v!),
             ),
             const SizedBox(height: 16),
@@ -621,7 +636,10 @@ class _EditStudentDialogState extends State<_EditStudentDialog> {
               value: _selectedMobility,
               decoration: _inputDeco('Movilidad'),
               dropdownColor: AppTheme.surfaceLight,
-              items: MobilityFlag.values.map((m) => DropdownMenuItem(value: m, child: Text(AppTheme.mobilityLabel(m), style: const TextStyle(color: AppTheme.textPrimary)))).toList(),
+              items: MobilityFlag.values.map((m) => DropdownMenuItem(
+                value: m, 
+                child: Text(AppTheme.mobilityLabel(m), style: const TextStyle(color: AppTheme.textPrimary))
+              )).toList(),
               onChanged: (v) => setState(() => _selectedMobility = v!),
             ),
             const SizedBox(height: 16),
@@ -629,7 +647,10 @@ class _EditStudentDialogState extends State<_EditStudentDialog> {
               value: _selectedTutorId,
               decoration: _inputDeco('Tutor Asignado'),
               dropdownColor: AppTheme.surfaceLight,
-              items: widget.tutors.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name, style: const TextStyle(color: AppTheme.textPrimary)))).toList(),
+              items: widget.tutors.map((t) => DropdownMenuItem(
+                value: t.id, 
+                child: Text(t.name, style: const TextStyle(color: AppTheme.textPrimary))
+              )).toList(),
               onChanged: (v) => setState(() => _selectedTutorId = v!),
             ),
           ],
