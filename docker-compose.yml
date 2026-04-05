@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: tutoria_db_final
+    restart: always
+    environment:
+      POSTGRES_DB: tutoria_db
+      POSTGRES_USER: admin_tutoria
+      POSTGRES_PASSWORD: PasswordSeguro123
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata_final:/var/lib/postgresql/data
+
+volumes:
+  pgdata_final:

@@ -2,58 +2,52 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use App\Models\User;
+use PragmaRX\Google2FA\Google2FA;
 
-/*
-|--------------------------------------------------------------------------
-| API Routes - Monitor de Tutorías (Shiha)
-|--------------------------------------------------------------------------
-*/
+Route::post('/login', function (Request $request) {
+    $request->validate([
+        'email' => 'required|email',
+        'password' => 'required',
+    ]);
 
-Route::get('/tablas', function () {
-    try {
-        $tablas = DB::select("SELECT table_name 
-                              FROM information_schema.tables 
-                              WHERE LOWER(table_schema) = 'tutoria' 
-                              AND table_type = 'BASE TABLE'
-                              ORDER BY table_name ASC");
-        return response()->json($tablas);
-    } catch (\Exception $e) {
-        return response()->json(['error' => $e->getMessage()], 500);
+    $user = User::where('email', $request->email)->first();
+
+    if (!$user || !Hash::check($request->password, $user->password)) {
+        return response()->json(['message' => 'Unauthorized'], 401);
     }
+
+    if ($user->mfa_enabled) {
+        return response()->json([
+            'status' => 'MFA_REQUIRED',
+            'temp_token' => $user->createToken('mfa_temp')->plainTextToken
+        ], 200);
+    }
+
+    return response()->json([
+        'status' => 'SUCCESS',
+        'token' => $user->createToken('auth_token')->plainTextToken
+    ], 200);
 });
 
-Route::get('/datos/{tabla}', function ($tabla) {
-    try {
-        if (!preg_match('/^[a-zA-Z0-9_]+$/', $tabla)) {
-            return response()->json(['error' => 'Nombre no válido'], 400);
-        }
+Route::middleware('auth:sanctum')->post('/mfa/verify', function (Request $request) {
+    $request->validate([
+        'mfa_code' => 'required|string'
+    ]);
 
-        $tablaLower = strtolower($tabla);
+    $user = $request->user();
+    $google2fa = new Google2FA();
+    
+    $valid = $google2fa->verifyKey($user->mfa_secret, $request->input('mfa_code'));
 
-        // Si es GRUPO o BORRADOR, forzamos los JOINs con el esquema 'tutoria'
-        if ($tablaLower === 'grupo' || $tablaLower === 'borrador') {
-            $registros = DB::table("tutoria.$tablaLower as t")
-                ->join("tutoria.profesores as p", "t.correo_profe", "=", "p.correo")
-                ->join("tutoria.alumnos as a", "t.num_cuenta", "=", "a.num_cuenta")
-                ->select(
-                    "t.*", 
-                    "p.nombre as nombre_profesor", 
-                    "a.nombre as nombre_alumno"
-                )
-                ->get();
-        } else {
-            $registros = DB::table("tutoria.$tablaLower")->get();
-        }
-
-        return response()->json($registros);
-
-    } catch (\Exception $e) {
-        // MUY IMPORTANTE: Este mensaje te dirá exactamente qué falta en tu base de datos
+    if ($valid) {
+        $user->tokens()->where('name', 'mfa_temp')->delete();
         return response()->json([
-            'status' => 'error',
-            'message' => 'Error en la base de datos',
-            'sql_error' => $e->getMessage()
-        ], 500);
+            'status' => 'SUCCESS',
+            'token' => $user->createToken('auth_token')->plainTextToken
+        ], 200);
     }
+
+    return response()->json(['status' => 'FAILED'], 401);
 });

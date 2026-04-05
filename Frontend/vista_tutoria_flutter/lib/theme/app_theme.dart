@@ -37,4 +37,17 @@ class AppTheme {
       case MobilityFlag.newStudent: return 'Nuevo Ingreso';
     }
   }
+
+  static ThemeData get lightTheme {
+    return ThemeData.dark().copyWith(
+      scaffoldBackgroundColor: bg,
+      colorScheme: const ColorScheme.dark(
+        primary: accent,
+        surface: surface,
+      ),
+      textTheme: const TextTheme(
+        bodyMedium: TextStyle(color: textPrimary, fontFamily: 'monospace'),
+      ),
+    );
+  }
 }

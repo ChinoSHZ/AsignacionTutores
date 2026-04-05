@@ -17,6 +17,8 @@ return new class extends Migration
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
+            $table->boolean('mfa_enabled')->default(false);
+            $table->text('mfa_secret')->nullable();
             $table->rememberToken();
             $table->timestamps();
         });
