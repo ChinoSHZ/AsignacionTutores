@@ -9,6 +9,20 @@ import 'careers_screen.dart';
 import 'tutors_screen.dart';
 import 'assignments_screen.dart';
 import 'logs_screen.dart';
+import 'usuarios_management_screen.dart'; // Asegúrate de crear este archivo
+
+// 1. Actualización del Enum para incluir las nuevas opciones
+enum Screen { 
+  upload, 
+  processing, 
+  dashboard, 
+  careers, 
+  tutors, 
+  assignments, 
+  logs, 
+  users, 
+  logout 
+}
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -20,7 +34,6 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   Screen _current = Screen.dashboard;
   
-  // Estado global de la aplicación
   final List<Tutor> tutors = mockTutors;
   final List<Student> students = mockStudents;
   final List<Career> careers = mockCareers;
@@ -28,11 +41,9 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
-    // Poblamos los tutores con sus alumnos correspondientes
     for (final t in tutors) {
       t.students = students.where((s) => s.tutorId == t.id).toList();
     }
-    // Ajustes manuales para crear escenarios interesantes en el Dashboard
     tutors[0].students = students.where((s) => s.tutorId == 't1').take(30).toList();
     tutors[1].students = students.where((s) => s.tutorId == 't2').take(28).toList() 
         + students.where((s) => s.tutorId == 't3').take(3).toList();
@@ -57,13 +68,21 @@ class _MainShellState extends State<MainShell> {
     return Scaffold(
       body: Row(
         children: [
-          _Sidebar(current: _current, onSelect: (s) => setState(() => _current = s)),
+          _Sidebar(current: _current, onSelect: (s) {
+            if (s == Screen.logout) {
+              // Lógica de cierre de sesión inmediata
+              Navigator.pushReplacementNamed(context, '/login');
+            } else {
+              setState(() => _current = s);
+            }
+          }),
           Expanded(child: _buildScreen()),
         ],
       ),
     );
   }
 
+  // 2. Lógica para renderizar la nueva pantalla de Usuarios
   Widget _buildScreen() {
     switch (_current) {
       case Screen.upload: 
@@ -85,6 +104,10 @@ class _MainShellState extends State<MainShell> {
         ); 
       case Screen.logs: 
         return LogsScreen(logs: mockLogs);
+      case Screen.users:
+        return const UsuariosManagementScreen(); // Nueva pantalla
+      case Screen.logout:
+        return const SizedBox.shrink();
     }
   }
 }
@@ -97,6 +120,7 @@ class _Sidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 3. Inserción de los nuevos apartados en la lista de ítems
     final items = [
       (Screen.upload, Icons.upload_file_rounded, 'Cargar Datos'),
       (Screen.processing, Icons.auto_fix_high_rounded, 'Procesamiento'),
@@ -105,6 +129,8 @@ class _Sidebar extends StatelessWidget {
       (Screen.tutors, Icons.badge_rounded, 'Tutores'),
       (Screen.assignments, Icons.people_alt_rounded, 'Asignaciones'),
       (Screen.logs, Icons.history_rounded, 'Registro'),
+      (Screen.users, Icons.manage_accounts_rounded, 'Usuarios'), // Nuevo
+      (Screen.logout, Icons.logout_rounded, 'Cerrar Sesión'),      // Nuevo
     ];
 
     return Container(

@@ -31,6 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.2.0  # Añade esta línea
+  qr_flutter: ^4.1.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -59,6 +60,8 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/images/UAEMex.png
+    - assets/images/EscudoFacultad.jpg
     - assets/images/  # Esto incluye todos los archivos dentro de la carpeta
   # To add assets to your application, add an assets section, like this:
   # assets:
