@@ -4,6 +4,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
+use App\Models\Licenciatura;
+use App\Models\Profesor;
 use PragmaRX\Google2FA\Google2FA;
 
 Route::post('/login', function (Request $request) {
@@ -138,4 +140,15 @@ Route::middleware('auth:sanctum')->post('/mfa/verify', function (Request $reques
     }
 
     return response()->json(['status' => 'FAILED'], 401);
+});
+
+// Endpoint para obtener todas las licenciaturas
+Route::get('/licenciaturas', function () {
+    return response()->json(Licenciatura::all());
+});
+
+// Endpoint para obtener todos los profesores con sus licenciaturas (Muchos a Muchos)
+Route::get('/profesores', function () {
+    // Laravel descifrará los campos 'encrypted' automáticamente
+    return response()->json(Profesor::with('licenciaturas')->get());
 });

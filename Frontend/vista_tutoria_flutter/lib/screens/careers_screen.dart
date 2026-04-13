@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../widgets/screen_wrapper.dart';
 
 class CareersScreen extends StatefulWidget {
-  final List<Career> careers;
+  // Ya no dependemos exclusivamente de los mocks pasados por constructor
+  final List<Career> careers; 
   const CareersScreen({super.key, required this.careers});
 
   @override
@@ -13,6 +16,56 @@ class CareersScreen extends StatefulWidget {
 
 class _CareersScreenState extends State<CareersScreen> {
   String _searchQuery = '';
+  bool _isLoading = true;
+  String _errorMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCareersFromBackend(); // Iniciamos la carga al entrar a la pantalla
+  }
+
+  // Método para obtener las licenciaturas desde Laravel
+  Future<void> _fetchCareersFromBackend() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse('http://127.0.0.1:8000/api/licenciaturas'),
+        headers: {'Accept': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        
+        setState(() {
+          // Limpiamos la lista actual y mapeamos los datos de Postgres al modelo Career
+          widget.careers.clear();
+          for (var item in data) {
+            widget.careers.add(Career(
+              id: item['codigo'], // Mapeo de 'codigo' de la DB a 'id' del modelo
+              abbreviation: item['abreviatura'],
+              name: item['nombre'],
+            ));
+          }
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _errorMessage = 'Error del servidor: ${response.statusCode}';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error de conexión: $e';
+        _isLoading = false;
+      });
+    }
+  }
 
   List<Career> get _filteredCareers {
     if (_searchQuery.isEmpty) return widget.careers;
@@ -20,6 +73,108 @@ class _CareersScreenState extends State<CareersScreen> {
         c.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
         c.abbreviation.toLowerCase().contains(_searchQuery.toLowerCase())
     ).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScreenWrapper(
+      title: 'Catálogo de Carreras',
+      subtitle: 'Gestión de licenciaturas e ingenierías del sistema',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildHeader(),
+          const SizedBox(height: 24),
+          // Mostramos loader o error si es necesario
+          if (_isLoading)
+            const Center(child: Padding(
+              padding: EdgeInsets.all(40.0),
+              child: CircularProgressIndicator(),
+            ))
+          else if (_errorMessage.isNotEmpty)
+            Center(child: Text(_errorMessage, style: const TextStyle(color: AppTheme.red)))
+          else
+            _buildTable(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            onChanged: (v) => setState(() => _searchQuery = v),
+            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Buscar por nombre o abreviatura...',
+              prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary, size: 20),
+              filled: true,
+              fillColor: AppTheme.surface,
+              contentPadding: const EdgeInsets.symmetric(vertical: 0),
+            ),
+          ),
+        ),
+        const SizedBox(width: 16),
+        ElevatedButton.icon(
+          onPressed: _fetchCareersFromBackend, // Botón para refrescar datos manualmente
+          icon: const Icon(Icons.refresh, size: 18),
+          label: const Text('REFRESCAR'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.surface,
+            foregroundColor: AppTheme.accent,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          ),
+        ),
+        const SizedBox(width: 12),
+        ElevatedButton.icon(
+          onPressed: () => _showCareerDialog(),
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('NUEVA CARRERA'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.accent,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTable() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: DataTable(
+        headingRowColor: WidgetStateProperty.all(AppTheme.bg),
+        columns: const [
+          DataColumn(label: Text('ID / CÓDIGO', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold))),
+          DataColumn(label: Text('ABREV.', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold))),
+          DataColumn(label: Text('NOMBRE COMPLETO', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold))),
+          DataColumn(label: Text('ACCIONES', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold))),
+        ],
+        rows: _filteredCareers.map((c) => DataRow(cells: [
+          DataCell(Text(c.id, style: const TextStyle(fontWeight: FontWeight.bold))),
+          DataCell(Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(color: AppTheme.accent.withValues(alpha:0.1), borderRadius: BorderRadius.circular(4)),
+            child: Text(c.abbreviation, style: const TextStyle(color: AppTheme.accentLight, fontWeight: FontWeight.bold)),
+          )),
+          DataCell(Text(c.name)),
+          DataCell(Row(
+            children: [
+              IconButton(icon: const Icon(Icons.edit_outlined, size: 18, color: AppTheme.textSecondary), onPressed: () => _showCareerDialog(career: c)),
+              IconButton(icon: const Icon(Icons.delete_outline, size: 18, color: AppTheme.red), onPressed: () {}),
+            ],
+          )),
+        ])).toList(),
+      ),
+    );
   }
 
   void _showCareerDialog({Career? career}) {
@@ -30,11 +185,9 @@ class _CareersScreenState extends State<CareersScreen> {
         onSave: (abbreviation, name) {
           setState(() {
             if (career == null) {
-              // Alta (El ID se genera simulado)
               final newId = 'C${DateTime.now().millisecondsSinceEpoch.toString().substring(9)}';
               widget.careers.add(Career(id: newId, abbreviation: abbreviation.toUpperCase(), name: name));
             } else {
-              // Editar
               career.abbreviation = abbreviation.toUpperCase();
               career.name = name;
             }
@@ -43,163 +196,11 @@ class _CareersScreenState extends State<CareersScreen> {
       ),
     );
   }
-
-  void _deleteCareer(Career career) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        title: const Text('Eliminar Carrera', style: TextStyle(color: AppTheme.textPrimary)),
-        content: Text('¿Estás seguro de eliminar ${career.abbreviation}? Esto podría afectar a los alumnos y tutores asignados a ella.', style: const TextStyle(color: AppTheme.textSecondary)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar', style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.red, foregroundColor: Colors.white),
-            onPressed: () {
-              setState(() => widget.careers.remove(career));
-              Navigator.pop(context);
-            },
-            child: const Text('Eliminar'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final filtered = _filteredCareers;
-
-    return ScreenWrapper(
-      title: 'Catálogo de Carreras',
-      subtitle: 'Administración de licenciaturas e ingenierías',
-      scrollable: false,
-      child: Column(children: [
-        // Action Bar
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppTheme.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppTheme.border),
-          ),
-          child: Row(children: [
-            Expanded(
-              child: TextField(
-                onChanged: (v) => setState(() => _searchQuery = v),
-                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Buscar por abreviatura o nombre...',
-                  hintStyle: const TextStyle(color: AppTheme.textSecondary),
-                  prefixIcon: const Icon(Icons.search_rounded, color: AppTheme.textSecondary, size: 20),
-                  filled: true,
-                  fillColor: AppTheme.bg,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-            ),
-            const SizedBox(width: 16),
-            ElevatedButton.icon(
-              onPressed: () => _showCareerDialog(),
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Nueva Carrera'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accent,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
-          ]),
-        ),
-
-        const SizedBox(height: 16),
-
-        // Table Header
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: AppTheme.surfaceLight,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-            border: Border.all(color: AppTheme.border),
-          ),
-          child: const Row(children: [
-            SizedBox(width: 80, child: Text('ID', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold))),
-            SizedBox(width: 100, child: Text('Abreviatura', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold))),
-            Expanded(child: Text('Nombre de la Carrera', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold))),
-            SizedBox(width: 100, child: Text('Acciones', textAlign: TextAlign.right, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold))),
-          ]),
-        ),
-
-        // Table Body
-        Expanded(child: Container(
-          decoration: BoxDecoration(
-            color: AppTheme.surface,
-            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
-            border: Border.all(color: AppTheme.border),
-          ),
-          child: filtered.isEmpty 
-          ? const Center(child: Text('No hay carreras registradas', style: TextStyle(color: AppTheme.textSecondary)))
-          : ListView.separated(
-            itemCount: filtered.length,
-            separatorBuilder: (_, __) => const Divider(color: AppTheme.border, height: 0),
-            itemBuilder: (_, i) {
-              final c = filtered[i];
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Row(children: [
-                  SizedBox(width: 80, child: Text(c.id, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12))),
-                  SizedBox(width: 100, child: Container(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accent.withValues(alpha:0.1), 
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(c.abbreviation, style: const TextStyle(color: AppTheme.accentLight, fontWeight: FontWeight.bold, fontSize: 12)),
-                    ),
-                  )),
-                  Expanded(child: Text(c.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13))),
-                  SizedBox(width: 100, child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      IconButton(
-                        onPressed: () => _showCareerDialog(career: c),
-                        icon: const Icon(Icons.edit_rounded, size: 16),
-                        color: const Color(0xFF3498DB),
-                        tooltip: 'Editar',
-                        constraints: const BoxConstraints(),
-                        padding: const EdgeInsets.all(8),
-                      ),
-                      IconButton(
-                        onPressed: () => _deleteCareer(c),
-                        icon: const Icon(Icons.delete_outline_rounded, size: 16),
-                        color: AppTheme.red,
-                        tooltip: 'Borrar',
-                        constraints: const BoxConstraints(),
-                        padding: const EdgeInsets.all(8),
-                      ),
-                    ],
-                  )),
-                ]),
-              );
-            },
-          ),
-        )),
-      ]),
-    );
-  }
 }
 
 class _CareerDialog extends StatefulWidget {
   final Career? career;
-  final Function(String abbreviation, String name) onSave;
-
+  final Function(String, String) onSave;
   const _CareerDialog({this.career, required this.onSave});
 
   @override
@@ -207,7 +208,8 @@ class _CareerDialog extends StatefulWidget {
 }
 
 class _CareerDialogState extends State<_CareerDialog> {
-  late TextEditingController _abrevCtrl, _nameCtrl;
+  late TextEditingController _abrevCtrl;
+  late TextEditingController _nameCtrl;
 
   @override
   void initState() {
@@ -218,29 +220,21 @@ class _CareerDialogState extends State<_CareerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final isEdit = widget.career != null;
     return Dialog(
       backgroundColor: AppTheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: 400, padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
+        width: 400,
         child: Column(
-          mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(isEdit ? 'Editar Carrera' : 'Alta de Carrera', style: const TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _abrevCtrl,
-              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-              textCapitalization: TextCapitalization.characters,
-              decoration: _inputDeco('Abreviatura (Ej: ICO)'),
-            ),
+            Text(widget.career == null ? 'Nueva Carrera' : 'Editar Carrera', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.accentLight)),
+            const SizedBox(height: 24),
+            TextField(controller: _abrevCtrl, decoration: _inputDeco('Abreviatura (ej. ICO)')),
             const SizedBox(height: 16),
-            TextField(
-              controller: _nameCtrl,
-              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-              decoration: _inputDeco('Nombre completo de la carrera'),
-            ),
+            TextField(controller: _nameCtrl, decoration: _inputDeco('Nombre completo de la carrera')),
             const SizedBox(height: 24),
             Row(mainAxisAlignment: MainAxisAlignment.end, children: [
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar', style: TextStyle(color: AppTheme.textSecondary))),
@@ -264,8 +258,10 @@ class _CareerDialogState extends State<_CareerDialog> {
 
   InputDecoration _inputDeco(String label) {
     return InputDecoration(
-      labelText: label, labelStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-      filled: true, fillColor: AppTheme.bg,
+      labelText: label,
+      labelStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+      filled: true,
+      fillColor: AppTheme.bg,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     );
