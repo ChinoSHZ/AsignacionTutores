@@ -10,7 +10,5 @@ services:
     ports:
       - "5434:5432"
     volumes:
-      - pgdata_final:/var/lib/postgresql/data
-
-volumes:
-  pgdata_final:
+      # Se cambia el volumen nombrado 'pgdata_final' por la carpeta local 'tutores_data'
+      - ./tutores_data:/var/lib/postgresql/data

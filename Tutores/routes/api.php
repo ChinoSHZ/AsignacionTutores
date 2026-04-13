@@ -18,13 +18,8 @@ Route::post('/login', function (Request $request) {
         return response()->json(['message' => 'Unauthorized'], 401);
     }
 
-    if ($user->mfa_enabled) {
-        return response()->json([
-            'status' => 'MFA_REQUIRED',
-            'temp_token' => $user->createToken('mfa_temp')->plainTextToken
-        ], 200);
-    }
-
+    // Se elimina el bloque 'if ($user->mfa_enabled)' para omitir el paso de MFA
+    // y entregar el token de acceso completo (auth_token) de inmediato.
     return response()->json([
         'status' => 'SUCCESS',
         'token' => $user->createToken('auth_token')->plainTextToken
