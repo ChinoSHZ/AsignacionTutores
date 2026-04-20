@@ -40,6 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        
         if (data['status'] == 'MFA_REQUIRED') {
           if (!mounted) return;
           Navigator.pushReplacementNamed(
@@ -49,7 +50,16 @@ class _LoginScreenState extends State<LoginScreen> {
           );
         } else if (data['status'] == 'SUCCESS') {
           if (!mounted) return;
-          Navigator.pushReplacementNamed(context, '/home');
+          
+          // Se captura la bandera de primer inicio de sesión del backend
+          final bool isFirstLogin = data['first_login'] ?? false;
+          
+          // Se navega a /home pasando la bandera como argumento
+          Navigator.pushReplacementNamed(
+            context, 
+            '/home',
+            arguments: isFirstLogin,
+          );
         } else {
           setState(() => _errorMessage = 'Respuesta inesperada del servidor');
         }
@@ -187,7 +197,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextField(
                           controller: _emailController,
                           decoration: const InputDecoration(
-                            labelText: 'Correo electrónico',
+                            labelText: 'Correo electrónico / Usuario',
                             prefixIcon: Icon(Icons.email_outlined),
                           ),
                         ),

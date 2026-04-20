@@ -9,7 +9,8 @@ import 'careers_screen.dart';
 import 'tutors_screen.dart';
 import 'assignments_screen.dart';
 import 'logs_screen.dart';
-import 'usuarios_management_screen.dart'; // Asegúrate de crear este archivo
+import 'usuarios_management_screen.dart'; 
+import 'backup_screen.dart'; // <-- Se importó la nueva pantalla
 
 // 1. Actualización del Enum para incluir las nuevas opciones
 enum Screen { 
@@ -20,7 +21,8 @@ enum Screen {
   tutors, 
   assignments, 
   logs, 
-  users, 
+  users,
+  backup, // <-- Opción de Respaldo agregada
   logout 
 }
 
@@ -82,7 +84,7 @@ class _MainShellState extends State<MainShell> {
     );
   }
 
-  // 2. Lógica para renderizar la nueva pantalla de Usuarios
+  // 2. Lógica para renderizar las pantallas
   Widget _buildScreen() {
     switch (_current) {
       case Screen.upload: 
@@ -105,7 +107,9 @@ class _MainShellState extends State<MainShell> {
       case Screen.logs: 
         return LogsScreen(logs: mockLogs);
       case Screen.users:
-        return const UsuariosManagementScreen(); // Nueva pantalla
+        return const UsuariosManagementScreen();
+      case Screen.backup:
+        return const BackupScreen(); // <-- Renderizar la nueva pantalla de Respaldo
       case Screen.logout:
         return const SizedBox.shrink();
     }
@@ -129,8 +133,9 @@ class _Sidebar extends StatelessWidget {
       (Screen.tutors, Icons.badge_rounded, 'Tutores'),
       (Screen.assignments, Icons.people_alt_rounded, 'Asignaciones'),
       (Screen.logs, Icons.history_rounded, 'Registro'),
-      (Screen.users, Icons.manage_accounts_rounded, 'Usuarios'), // Nuevo
-      (Screen.logout, Icons.logout_rounded, 'Cerrar Sesión'),      // Nuevo
+      (Screen.users, Icons.manage_accounts_rounded, 'Usuarios'), 
+      (Screen.backup, Icons.save_alt_rounded, 'Respaldo de Datos'), // <-- Nuevo ítem en el menú lateral
+      (Screen.logout, Icons.logout_rounded, 'Cerrar Sesión'),      
     ];
 
     return Container(

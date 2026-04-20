@@ -13,9 +13,19 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   String _filterCareer = 'Todas';
+  bool _warningShown = false;
 
   @override
   Widget build(BuildContext context) {
+    final bool isFirstLogin = ModalRoute.of(context)?.settings.arguments as bool? ?? false;
+
+    if (isFirstLogin && !_warningShown) {
+      _warningShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showFirstLoginWarning(context);
+      });
+    }
+
     final critical = widget.tutors.where((t) => t.status == BalanceStatus.critical).length;
     final balanced = widget.tutors.where((t) => t.status == BalanceStatus.balanced).length;
 
@@ -142,6 +152,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
       ]),
+    );
+  }
+
+  void _showFirstLoginWarning(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: AppTheme.yellow),
+            SizedBox(width: 10),
+            Text("Advertencia", style: TextStyle(color: AppTheme.textPrimary)),
+          ],
+        ),
+        content: const Text(
+          "Antes de cerrar sesión vincule un usuario y contraseña al sistema.",
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Entendido", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
     );
   }
 }
