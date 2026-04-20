@@ -163,17 +163,6 @@ Route::middleware('auth:sanctum')->post('/mfa/verify', function (Request $reques
     return response()->json(['status' => 'FAILED'], 401);
 });
 
-// Endpoint para obtener todas las licenciaturas
-Route::get('/licenciaturas', function () {
-    return response()->json(Licenciatura::all());
-});
-
-// Endpoint para obtener todos los profesores con sus licenciaturas (Muchos a Muchos)
-Route::get('/profesores', function () {
-    // Laravel descifrará los campos 'encrypted' automáticamente
-    return response()->json(Profesor::with('licenciaturas')->get());
-});
-
 // RUTA PARA EXPORTAR (Descargar)
 Route::get('/backup/export', function (Request $request) {
     $filename = $request->query('filename', 'respaldo.sql');
@@ -239,4 +228,129 @@ Route::post('/backup/import', function (Request $request) {
     // Guardar error en log en caso de fallo
     \Illuminate\Support\Facades\Log::error("Error restaurando DB:\n" . implode("\n", $output));
     return response()->json(['status' => 'FAILED'], 500);
+});
+
+//------------------------------------------------------------------
+//-----------------------Licenciaturas------------------------------
+//------------------------------------------------------------------
+// Endpoint para obtener todas las licenciaturas (Este ya lo tenías)
+Route::get('/licenciaturas', function () {
+    return response()->json(App\Models\Licenciatura::all());
+});
+
+// Endpoint para CREAR una nueva licenciatura (CRUD)
+Route::post('/licenciaturas', function (Illuminate\Http\Request $request) {
+    $request->validate([
+        'abreviatura' => 'required|string',
+        'nombre' => 'required|string',
+    ]);
+    
+    // Autogenerar un código único secuencial (Ej. C07, C08)
+    $last = App\Models\Licenciatura::orderBy('id', 'desc')->first();
+    $nextId = $last ? $last->id + 1 : 1;
+    $codigo = 'C' . str_pad($nextId, 2, '0', STR_PAD_LEFT);
+
+    $licenciatura = App\Models\Licenciatura::create([
+        'codigo' => $codigo,
+        'abreviatura' => $request->abreviatura,
+        'nombre' => $request->nombre
+    ]);
+    return response()->json(['status' => 'SUCCESS', 'data' => $licenciatura]);
+});
+
+// Endpoint para ACTUALIZAR una licenciatura existente (CRUD)
+Route::put('/licenciaturas/{id}', function (Illuminate\Http\Request $request, $id) {
+    $licenciatura = App\Models\Licenciatura::findOrFail($id);
+    $request->validate([
+        'abreviatura' => 'required|string',
+        'nombre' => 'required|string',
+    ]);
+    
+    $licenciatura->update([
+        'abreviatura' => $request->abreviatura,
+        'nombre' => $request->nombre
+    ]);
+    return response()->json(['status' => 'SUCCESS', 'data' => $licenciatura]);
+});
+
+// Endpoint para ELIMINAR una licenciatura (CRUD)
+Route::delete('/licenciaturas/{id}', function ($id) {
+    // Al eliminar, la relación "onDelete('cascade')" limpiará automáticamente 
+    // a los profesores vinculados a esta carrera en la tabla pivote.
+    App\Models\Licenciatura::destroy($id);
+    return response()->json(['status' => 'SUCCESS']);
+});
+
+//------------------------------------------------------------------
+//--------------------FIN Licenciaturas-----------------------------
+//------------------------------------------------------------------
+
+//------------------------------------------------------------------
+//--------------------Profesores -----------------------------------
+//------------------------------------------------------------------
+// Endpoint para obtener todos los profesores con sus licenciaturas (Muchos a Muchos)
+Route::get('/profesores', function () {
+    // Laravel descifrará los campos 'encrypted' automáticamente
+    return response()->json(Profesor::with('licenciaturas')->get());
+});
+
+// Endpoint para CREAR un nuevo profesor (CRUD)
+Route::post('/profesores', function (Illuminate\Http\Request $request) {
+    $request->validate([
+        'nombre' => 'required|string',
+        'apellido_paterno' => 'required|string',
+        'apellido_materno' => 'nullable|string',
+        'correo' => 'nullable|email', // <-- CAMBIO: Ahora es opcional (nullable)
+        'carreras' => 'required|array',
+        'estado' => 'required|string',
+    ]);
+
+    $profesor = App\Models\Profesor::create([
+        'nombre' => $request->nombre,
+        'apellido_paterno' => $request->apellido_paterno,
+        'apellido_materno' => $request->apellido_materno ?? '',
+        'correo' => $request->correo ?? '', // Guardar vacío si no se envía
+        'estado' => $request->estado,
+    ]);
+
+    $licenciaturas = App\Models\Licenciatura::whereIn('abreviatura', $request->carreras)->pluck('id');
+    $profesor->licenciaturas()->sync($licenciaturas);
+
+    return response()->json(['status' => 'SUCCESS']);
+});
+
+// Endpoint para ACTUALIZAR un profesor (CRUD)
+Route::put('/profesores/{id}', function (Illuminate\Http\Request $request, $id) {
+    $profesor = App\Models\Profesor::findOrFail($id);
+    
+    $request->validate([
+        'nombre' => 'required|string',
+        'apellido_paterno' => 'required|string',
+        'apellido_materno' => 'nullable|string',
+        'correo' => 'nullable|email', // <-- CAMBIO: Ahora es opcional (nullable)
+        'carreras' => 'required|array',
+        'estado' => 'required|string',
+    ]);
+
+    $profesor->update([
+        'nombre' => $request->nombre,
+        'apellido_paterno' => $request->apellido_paterno,
+        'apellido_materno' => $request->apellido_materno ?? '',
+        'correo' => $request->correo ?? '', // Guardar vacío si no se envía
+        'estado' => $request->estado,
+    ]);
+
+    $licenciaturas = App\Models\Licenciatura::whereIn('abreviatura', $request->carreras)->pluck('id');
+    $profesor->licenciaturas()->sync($licenciaturas);
+
+    return response()->json(['status' => 'SUCCESS']);
+});
+
+// Endpoint para ELIMINAR un profesor (CRUD)
+Route::delete('/profesores/{id}', function ($id) {
+    $profesor = App\Models\Profesor::findOrFail($id);
+    $profesor->licenciaturas()->detach(); // Limpiar tabla pivote
+    $profesor->delete();
+    
+    return response()->json(['status' => 'SUCCESS']);
 });
