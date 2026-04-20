@@ -354,3 +354,40 @@ Route::delete('/profesores/{id}', function ($id) {
     
     return response()->json(['status' => 'SUCCESS']);
 });
+
+// LISTAR todos los semestres (ordenados más reciente primero)
+Route::get('/semestres', function () {
+    return response()->json(
+        Semestre::orderBy('clave', 'desc')->get()
+    );
+});
+ 
+// CREAR un semestre
+Route::post('/semestres', function (Illuminate\Http\Request $request) {
+    $request->validate([
+        'clave' => 'required|string|unique:semestres,clave|max:10',
+    ]);
+ 
+    $semestre = Semestre::create(['clave' => strtoupper(trim($request->clave))]);
+ 
+    return response()->json(['status' => 'SUCCESS', 'data' => $semestre], 201);
+});
+ 
+// ACTUALIZAR un semestre
+Route::put('/semestres/{id}', function (Illuminate\Http\Request $request, $id) {
+    $semestre = Semestre::findOrFail($id);
+ 
+    $request->validate([
+        'clave' => 'required|string|max:10|unique:semestres,clave,' . $id,
+    ]);
+ 
+    $semestre->update(['clave' => strtoupper(trim($request->clave))]);
+ 
+    return response()->json(['status' => 'SUCCESS', 'data' => $semestre]);
+});
+ 
+// ELIMINAR un semestre
+Route::delete('/semestres/{id}', function ($id) {
+    Semestre::destroy($id);
+    return response()->json(['status' => 'SUCCESS']);
+});
