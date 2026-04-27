@@ -9,6 +9,9 @@ use App\Models\Profesor;
 use PragmaRX\Google2FA\Google2FA;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
+use App\Http\Controllers\CargaDatosController;
+use App\Http\Controllers\Api\AsignacionController;
+use App\Http\Controllers\Api\SemestreController;
 
 Route::post('/login', function (Request $request) {
     $request->validate([
@@ -391,3 +394,10 @@ Route::delete('/semestres/{id}', function ($id) {
     Semestre::destroy($id);
     return response()->json(['status' => 'SUCCESS']);
 });
+
+// Esta ruta llena el combo de "Semestre" en Flutter
+Route::get('/semestres', [SemestreController::class, 'index']);
+
+// Esta es la que ya tenías para subir los archivos
+Route::post('/carga-masiva', [CargaDatosController::class, 'upload']);
+Route::get('/asignaciones/dashboard', [AsignacionController::class, 'index']);

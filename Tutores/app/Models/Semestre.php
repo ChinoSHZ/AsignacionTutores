@@ -10,7 +10,7 @@ class Semestre extends Model
     protected $table = 'semestres';
     protected $fillable = ['clave', 'tipo'];
 
-    public static function actual(): ?self
+    public static function actual()
     {
         return self::where('tipo', 'actual')->first();
     }

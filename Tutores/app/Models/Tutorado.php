@@ -22,34 +22,22 @@ class Tutorado extends Model
     {
         return [
             'is_active' => 'boolean',
+            // Agregamos cifrado a los campos de texto
+            'nombre' => 'encrypted',
+            'apellido_paterno' => 'encrypted',
+            'apellido_materno' => 'encrypted',
         ];
     }
 
-    // ── Relaciones ─────────────────────────────────────────
-
-    /**
-     * Un tutorado pertenece a una licenciatura.
-     */
     public function licenciatura()
     {
         return $this->belongsTo(Licenciatura::class);
     }
 
-    /**
-     * Un tutorado puede estar en múltiples grupos a lo largo de su carrera 
-     * (uno por semestre).
-     */
     public function grupos()
     {
         return $this->belongsToMany(Grupo::class, 'grupo_tutorado')
                     ->withPivot('semestre_id', 'estado_tutorado', 'movilidad')
                     ->withTimestamps();
-    }
-
-    // ── Accesores (Opcional) ───────────────────────────────
-    // Este helper te sirve para enviarle el nombre completo a Flutter tal cual lo espera
-    public function getNombreCompletoAttribute()
-    {
-        return trim("{$this->nombre} {$this->apellido_paterno} {$this->apellido_materno}");
     }
 }
