@@ -3,9 +3,13 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB; 
 use App\Models\User;
 use App\Models\Licenciatura;
 use App\Models\Profesor;
+use App\Models\Tutorado; 
+use App\Models\Grupo; 
+use App\Models\Semestre; 
 use PragmaRX\Google2FA\Google2FA;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
@@ -15,18 +19,16 @@ use App\Http\Controllers\Api\SemestreController;
 
 Route::post('/login', function (Request $request) {
     $request->validate([
-        'email' => 'required', // Se quita regla 'email' para permitir el texto "admin"
+        'email' => 'required', 
         'password' => 'required',
     ]);
 
-    // Verificar si la base de datos no tiene usuarios 
     $userCount = User::count();
 
     if ($userCount === 0 && $request->email === 'admin' && $request->password === 'admin') {
-        // Crear el usuario administrador inicial para permitir el acceso 
         $user = User::create([
             'name' => 'Administrador de Sistema',
-            'email' => 'admin@admin.com', // Email por defecto interno
+            'email' => 'admin@admin.com',
             'password' => Hash::make('admin'),
             'mfa_enabled' => false
         ]);
@@ -34,11 +36,10 @@ Route::post('/login', function (Request $request) {
         return response()->json([
             'status' => 'SUCCESS',
             'token' => $user->createToken('auth_token')->plainTextToken,
-            'first_login' => true // Bandera para el frontend
+            'first_login' => true 
         ], 200);
     }
 
-    // Lógica existente para usuarios normales
     $user = User::where('email', $request->email)->first();
 
     if (!$user || !Hash::check($request->password, $user->password)) {
@@ -91,7 +92,6 @@ Route::post('/usuarios/crear', function (Request $request) {
         'mfa_secret' => $secret
     ]);
 
-    // Generar URL para el QR
     $qrUrl = "otpauth://totp/TutorAssign:{$user->email}?secret={$secret}&issuer=TutorAssign";
 
     return response()->json([
@@ -128,7 +128,6 @@ Route::post('/login/mfa-start', function (Request $request) {
         return response()->json(['message' => 'Usuario no encontrado'], 404);
     }
 
-    // Generamos un token temporal sin pedir contraseña
     return response()->json([
         'status' => 'MFA_REQUIRED',
         'temp_token' => $user->createToken('mfa_temp')->plainTextToken
@@ -138,7 +137,7 @@ Route::post('/login/mfa-start', function (Request $request) {
 Route::middleware('auth:sanctum')->post('/mfa/verify', function (Request $request) {
     $request->validate([
         'mfa_code' => 'required|string',
-        'new_password' => 'nullable|string|min:6' // Parámetro opcional para actualización
+        'new_password' => 'nullable|string|min:6' 
     ]);
 
     $user = $request->user();
@@ -147,15 +146,13 @@ Route::middleware('auth:sanctum')->post('/mfa/verify', function (Request $reques
     $valid = $google2fa->verifyKey($user->mfa_secret, $request->mfa_code);
 
     if ($valid) {
-        // Si la intención es actualizar contraseña
         if ($request->has('new_password')) {
             $user->password = Hash::make($request->new_password);
             $user->save();
-            $user->tokens()->delete(); // Seguridad: Revoca todos los tokens tras cambio de clave
+            $user->tokens()->delete(); 
             return response()->json(['status' => 'SUCCESS', 'message' => 'Password updated']);
         }
 
-        // Flujo normal de login
         $user->tokens()->where('name', 'mfa_temp')->delete();
         return response()->json([
             'status' => 'SUCCESS', 
@@ -166,16 +163,13 @@ Route::middleware('auth:sanctum')->post('/mfa/verify', function (Request $reques
     return response()->json(['status' => 'FAILED'], 401);
 });
 
-// RUTA PARA EXPORTAR (Descargar)
 Route::get('/backup/export', function (Request $request) {
     $filename = $request->query('filename', 'respaldo.sql');
     $path = storage_path('app/' . $filename);
     
-    // 1. Generar el dump DENTRO del contenedor Docker usando variables de entorno
     $dockerDumpCmd = "docker exec -e PGPASSWORD=PasswordSeguro123 tutoria_db_final pg_dump -U admin_tutoria -d tutoria_db -F c -f /tmp/{$filename}";
     exec($dockerDumpCmd);
 
-    // 2. Copiar el archivo desde el contenedor hacia la carpeta de Laravel
     $dockerCpCmd = "docker cp tutoria_db_final:/tmp/{$filename} \"{$path}\"";
     exec($dockerCpCmd);
 
@@ -186,7 +180,6 @@ Route::get('/backup/export', function (Request $request) {
     return response()->json(['error' => 'No se pudo generar el respaldo'], 500);
 });
 
-// RUTA PARA IMPORTAR (Restaurar)
 Route::post('/backup/import', function (Request $request) {
     $request->validate([
         'backup_file' => 'required|file'
@@ -195,22 +188,17 @@ Route::post('/backup/import', function (Request $request) {
     $file = $request->file('backup_file');
     $path = $file->storeAs('backups', 'restore.sql', 'local');
     
-    // Obtener la ruta absoluta real generada por el disco 'local'
     $fullPath = Storage::disk('local')->path($path);
 
-    // 1. Detección Inteligente del formato del archivo
     $header = file_get_contents($fullPath, false, null, 0, 5);
     $isCustomFormat = ($header === 'PGDMP');
 
-    // 2. Copiar al contenedor Docker
     $dockerCpCmd = "docker cp \"{$fullPath}\" tutoria_db_final:/tmp/restore.sql";
     exec($dockerCpCmd);
 
-    // 3. Limpiar la base de datos actual
     $dockerCleanCmd = "docker exec -e PGPASSWORD=PasswordSeguro123 tutoria_db_final psql -U admin_tutoria -d tutoria_db -c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\"";
     exec($dockerCleanCmd);
 
-    // 4. Ejecutar restauración según el formato detectado
     if ($isCustomFormat) {
         $restoreCmd = "docker exec -e PGPASSWORD=PasswordSeguro123 tutoria_db_final pg_restore -U admin_tutoria -d tutoria_db -O -x /tmp/restore.sql 2>&1";
     } else {
@@ -219,36 +207,27 @@ Route::post('/backup/import', function (Request $request) {
     
     exec($restoreCmd, $output, $returnVar);
 
-    // 5. Limpieza de temporales
     Storage::disk('local')->delete($path);
     exec("docker exec tutoria_db_final rm /tmp/restore.sql");
 
-    // Si es exitoso
     if (in_array($returnVar, [0, 1, 3])) {
         return response()->json(['status' => 'SUCCESS']);
     }
 
-    // Guardar error en log en caso de fallo
     \Illuminate\Support\Facades\Log::error("Error restaurando DB:\n" . implode("\n", $output));
     return response()->json(['status' => 'FAILED'], 500);
 });
 
-//------------------------------------------------------------------
-//-----------------------Licenciaturas------------------------------
-//------------------------------------------------------------------
-// Endpoint para obtener todas las licenciaturas (Este ya lo tenías)
 Route::get('/licenciaturas', function () {
     return response()->json(App\Models\Licenciatura::all());
 });
 
-// Endpoint para CREAR una nueva licenciatura (CRUD)
 Route::post('/licenciaturas', function (Illuminate\Http\Request $request) {
     $request->validate([
         'abreviatura' => 'required|string',
         'nombre' => 'required|string',
     ]);
     
-    // Autogenerar un código único secuencial (Ej. C07, C08)
     $last = App\Models\Licenciatura::orderBy('id', 'desc')->first();
     $nextId = $last ? $last->id + 1 : 1;
     $codigo = 'C' . str_pad($nextId, 2, '0', STR_PAD_LEFT);
@@ -261,7 +240,6 @@ Route::post('/licenciaturas', function (Illuminate\Http\Request $request) {
     return response()->json(['status' => 'SUCCESS', 'data' => $licenciatura]);
 });
 
-// Endpoint para ACTUALIZAR una licenciatura existente (CRUD)
 Route::put('/licenciaturas/{id}', function (Illuminate\Http\Request $request, $id) {
     $licenciatura = App\Models\Licenciatura::findOrFail($id);
     $request->validate([
@@ -276,34 +254,21 @@ Route::put('/licenciaturas/{id}', function (Illuminate\Http\Request $request, $i
     return response()->json(['status' => 'SUCCESS', 'data' => $licenciatura]);
 });
 
-// Endpoint para ELIMINAR una licenciatura (CRUD)
 Route::delete('/licenciaturas/{id}', function ($id) {
-    // Al eliminar, la relación "onDelete('cascade')" limpiará automáticamente 
-    // a los profesores vinculados a esta carrera en la tabla pivote.
     App\Models\Licenciatura::destroy($id);
     return response()->json(['status' => 'SUCCESS']);
 });
 
-//------------------------------------------------------------------
-//--------------------FIN Licenciaturas-----------------------------
-//------------------------------------------------------------------
-
-//------------------------------------------------------------------
-//--------------------Profesores -----------------------------------
-//------------------------------------------------------------------
-// Endpoint para obtener todos los profesores con sus licenciaturas (Muchos a Muchos)
 Route::get('/profesores', function () {
-    // Laravel descifrará los campos 'encrypted' automáticamente
     return response()->json(Profesor::with('licenciaturas')->get());
 });
 
-// Endpoint para CREAR un nuevo profesor (CRUD)
 Route::post('/profesores', function (Illuminate\Http\Request $request) {
     $request->validate([
         'nombre' => 'required|string',
         'apellido_paterno' => 'required|string',
         'apellido_materno' => 'nullable|string',
-        'correo' => 'nullable|email', // <-- CAMBIO: Ahora es opcional (nullable)
+        'correo' => 'nullable|email', 
         'carreras' => 'required|array',
         'estado' => 'required|string',
     ]);
@@ -312,7 +277,7 @@ Route::post('/profesores', function (Illuminate\Http\Request $request) {
         'nombre' => $request->nombre,
         'apellido_paterno' => $request->apellido_paterno,
         'apellido_materno' => $request->apellido_materno ?? '',
-        'correo' => $request->correo ?? '', // Guardar vacío si no se envía
+        'correo' => $request->correo ?? '', 
         'estado' => $request->estado,
     ]);
 
@@ -322,7 +287,6 @@ Route::post('/profesores', function (Illuminate\Http\Request $request) {
     return response()->json(['status' => 'SUCCESS']);
 });
 
-// Endpoint para ACTUALIZAR un profesor (CRUD)
 Route::put('/profesores/{id}', function (Illuminate\Http\Request $request, $id) {
     $profesor = App\Models\Profesor::findOrFail($id);
     
@@ -330,7 +294,7 @@ Route::put('/profesores/{id}', function (Illuminate\Http\Request $request, $id) 
         'nombre' => 'required|string',
         'apellido_paterno' => 'required|string',
         'apellido_materno' => 'nullable|string',
-        'correo' => 'nullable|email', // <-- CAMBIO: Ahora es opcional (nullable)
+        'correo' => 'nullable|email',
         'carreras' => 'required|array',
         'estado' => 'required|string',
     ]);
@@ -339,7 +303,7 @@ Route::put('/profesores/{id}', function (Illuminate\Http\Request $request, $id) 
         'nombre' => $request->nombre,
         'apellido_paterno' => $request->apellido_paterno,
         'apellido_materno' => $request->apellido_materno ?? '',
-        'correo' => $request->correo ?? '', // Guardar vacío si no se envía
+        'correo' => $request->correo ?? '', 
         'estado' => $request->estado,
     ]);
 
@@ -349,23 +313,84 @@ Route::put('/profesores/{id}', function (Illuminate\Http\Request $request, $id) 
     return response()->json(['status' => 'SUCCESS']);
 });
 
-// Endpoint para ELIMINAR un profesor (CRUD)
 Route::delete('/profesores/{id}', function ($id) {
     $profesor = App\Models\Profesor::findOrFail($id);
-    $profesor->licenciaturas()->detach(); // Limpiar tabla pivote
+    $profesor->licenciaturas()->detach(); 
     $profesor->delete();
     
     return response()->json(['status' => 'SUCCESS']);
 });
 
-// LISTAR todos los semestres (ordenados más reciente primero)
+Route::post('/profesores/excel', function (Request $request) {
+    $request->validate([
+        'file' => 'required|file|mimes:xlsx,xls,csv'
+    ]);
+
+    try {
+        DB::beginTransaction();
+
+        Profesor::query()->delete();
+
+        $import = new class {};
+        $data = \Maatwebsite\Excel\Facades\Excel::toArray($import, $request->file('file'))[0];
+
+        $profesoresCreados = [];
+
+        for ($i = 1; $i < count($data); $i++) {
+            $row = $data[$i];
+
+            if (!isset($row[1]) || !isset($row[3]) || trim($row[1]) === '' || trim($row[3]) === '') {
+                continue;
+            }
+
+            $abreviatura = trim($row[0] ?? '');
+            $apPaterno = trim($row[1] ?? '');
+            $apMaterno = trim($row[2] ?? '');
+            $nombre = trim($row[3] ?? '');
+            $correo = trim($row[4] ?? '');
+            $estadoVal = trim($row[5] ?? '');
+
+            $estado = empty($estadoVal) ? 'Activo' : 'Inactivo';
+
+            $key = strtolower($nombre . '|' . $apPaterno . '|' . $apMaterno);
+
+            if (!isset($profesoresCreados[$key])) {
+                $profesor = Profesor::create([
+                    'nombre' => $nombre,
+                    'apellido_paterno' => $apPaterno,
+                    'apellido_materno' => $apMaterno,
+                    'correo' => $correo,
+                    'estado' => $estado,
+                ]);
+                $profesoresCreados[$key] = $profesor;
+            } else {
+                $profesor = $profesoresCreados[$key];
+            }
+
+            if (!empty($abreviatura)) {
+                $lic = Licenciatura::where('abreviatura', $abreviatura)->first();
+                if ($lic) {
+                    $profesor->licenciaturas()->syncWithoutDetaching([$lic->id]);
+                }
+            }
+        }
+
+        DB::commit();
+        return response()->json(['status' => 'SUCCESS']);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        \Illuminate\Support\Facades\Log::error("Error subiendo Excel Profesores: " . $e->getMessage());
+        return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
+    }
+});
+
 Route::get('/semestres', function () {
     return response()->json(
         Semestre::orderBy('clave', 'desc')->get()
     );
 });
  
-// CREAR un semestre
 Route::post('/semestres', function (Illuminate\Http\Request $request) {
     $request->validate([
         'clave' => 'required|string|unique:semestres,clave|max:10',
@@ -376,7 +401,6 @@ Route::post('/semestres', function (Illuminate\Http\Request $request) {
     return response()->json(['status' => 'SUCCESS', 'data' => $semestre], 201);
 });
  
-// ACTUALIZAR un semestre
 Route::put('/semestres/{id}', function (Illuminate\Http\Request $request, $id) {
     $semestre = Semestre::findOrFail($id);
  
@@ -389,15 +413,167 @@ Route::put('/semestres/{id}', function (Illuminate\Http\Request $request, $id) {
     return response()->json(['status' => 'SUCCESS', 'data' => $semestre]);
 });
  
-// ELIMINAR un semestre
 Route::delete('/semestres/{id}', function ($id) {
     Semestre::destroy($id);
     return response()->json(['status' => 'SUCCESS']);
 });
 
-// Esta ruta llena el combo de "Semestre" en Flutter
 Route::get('/semestres', [SemestreController::class, 'index']);
 
-// Esta es la que ya tenías para subir los archivos
 Route::post('/carga-masiva', [CargaDatosController::class, 'upload']);
-Route::get('/asignaciones/dashboard', [AsignacionController::class, 'index']);
+
+// REQ 1: MODIFICACIÓN PARA FILTRAR POR SEMESTRE O DEVOLVER TODOS
+Route::get('/asignaciones/dashboard', function(Request $request) {
+    // 1. Obtener el parámetro 'semestre'. Si no se envía o es 'Todos', se cargan ambos semestres.
+    $filtroSemestre = $request->query('semestre', 'Todos');
+
+    $query = Grupo::with([
+        'tutor.licenciaturas',
+        'tutorados.licenciatura',
+    ]);
+
+    if ($filtroSemestre !== 'Todos') {
+        $semestreObj = Semestre::where('clave', $filtroSemestre)->first();
+        if ($semestreObj) {
+            $query->where('semestre_id', $semestreObj->id);
+        } else {
+            // Si el semestre no existe, retornamos vacío
+            return response()->json([
+                'semestres'     => Semestre::all(),
+                'tutores'       => [],
+                'licenciaturas' => Licenciatura::all(),
+            ]);
+        }
+    }
+
+    $grupos = $query->get();
+
+    $tutoresMap = [];
+
+    foreach ($grupos as $grupo) {
+        $tutor = $grupo->tutor;
+        if (!$tutor) continue;
+
+        $tutorId = $tutor->id;
+
+        if (!isset($tutoresMap[$tutorId])) {
+            $tutoresMap[$tutorId] = [
+                'id'              => $tutorId,
+                'nombre'          => $tutor->nombre,
+                'apellido_paterno'=> $tutor->apellido_paterno,
+                'apellido_materno'=> $tutor->apellido_materno,
+                'correo'          => $tutor->correo,
+                'estado'          => $tutor->estado,
+                'licenciaturas'   => $tutor->licenciaturas->map(fn($l) => [
+                    'id'          => $l->id,
+                    'codigo'      => $l->codigo,
+                    'abreviatura' => $l->abreviatura,
+                    'nombre'      => $l->nombre,
+                ])->values()->toArray(),
+                'grupos' => [],
+            ];
+        }
+
+        $tutorados = $grupo->tutorados->map(function ($tutorado) {
+            $pivot = $tutorado->pivot;
+            return [
+                'id'               => $tutorado->id,
+                'numero_cuenta'    => $tutorado->numero_cuenta,
+                'nombre'           => $tutorado->nombre,
+                'apellido_paterno' => $tutorado->apellido_paterno,
+                'apellido_materno' => $tutorado->apellido_materno,
+                'periodo_ingreso'  => $tutorado->periodo_ingreso,
+                'is_active'        => $tutorado->is_active,
+                'licenciatura'     => $tutorado->licenciatura ? [
+                    'id'          => $tutorado->licenciatura->id,
+                    'abreviatura' => $tutorado->licenciatura->abreviatura,
+                    'nombre'      => $tutorado->licenciatura->nombre,
+                ] : null,
+                'pivot' => [
+                    'movilidad'       => $pivot->movilidad       ?? 'no_cambiar',
+                    'estado_tutorado' => $pivot->estado_tutorado ?? 'activo',
+                    'semestre_id'     => $pivot->semestre_id,
+                ],
+            ];
+        })->values()->toArray();
+
+        $tutoresMap[$tutorId]['grupos'][] = [
+            'id'           => $grupo->id,
+            'semestre_id'  => $grupo->semestre_id,
+            'estado_tutor' => $grupo->estado_tutor,
+            'tutorados'    => $tutorados,
+        ];
+    }
+
+    return response()->json([
+        'semestres'     => Semestre::all(),
+        'tutores'       => array_values($tutoresMap),
+        'licenciaturas' => Licenciatura::all(),
+    ]);
+});
+
+
+Route::get('/usuarios', function () {
+    return response()->json(\App\Models\User::select('id', 'name', 'email', 'mfa_enabled')->get());
+});
+
+Route::delete('/usuarios/{id}', function ($id) {
+    \App\Models\User::destroy($id);
+    return response()->json(['status' => 'SUCCESS']);
+});
+
+Route::post('/tutorados', function (Illuminate\Http\Request $request) {
+    $request->validate([
+        'numero_cuenta' => 'required|string',
+        'nombre' => 'required|string',
+        'apellido_paterno' => 'required|string',
+        'apellido_materno' => 'nullable|string',
+        'periodo_ingreso' => 'required|string',
+        'licenciatura_abreviatura' => 'required|string',
+        'tutor_id' => 'required|string', 
+        'movilidad' => 'required|string', 
+        'estado_tutorado' => 'required|boolean'
+    ]);
+
+    try {
+        DB::beginTransaction();
+
+        $licenciatura = Licenciatura::where('abreviatura', $request->licenciatura_abreviatura)->firstOrFail();
+        $semestreActual = Semestre::where('tipo', 'actual')->firstOrFail();
+
+        $tutorado = Tutorado::updateOrCreate(
+            ['numero_cuenta' => $request->numero_cuenta],
+            [
+                'nombre' => $request->nombre,
+                'apellido_paterno' => $request->apellido_paterno,
+                'apellido_materno' => $request->apellido_materno ?? '',
+                'periodo_ingreso' => $request->periodo_ingreso,
+                'licenciatura_id' => $licenciatura->id,
+                'is_active' => $request->estado_tutorado,
+            ]
+        );
+
+        $grupo = Grupo::firstOrCreate([
+            'semestre_id' => $semestreActual->id,
+            'tutor_id' => $request->tutor_id,
+        ]);
+
+        DB::table('grupo_tutorado')->updateOrInsert(
+            ['tutorado_id' => $tutorado->id, 'semestre_id' => $semestreActual->id],
+            [
+                'grupo_id' => $grupo->id,
+                'estado_tutorado' => $request->estado_tutorado ? 'activo' : 'baja',
+                'movilidad' => $request->movilidad,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
+
+        DB::commit();
+        return response()->json(['status' => 'SUCCESS']);
+    } catch (\Exception $e) {
+        DB::rollBack();
+        \Illuminate\Support\Facades\Log::error("Error guardando alumno: " . $e->getMessage());
+        return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
+    }
+});

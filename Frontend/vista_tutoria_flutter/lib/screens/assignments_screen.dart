@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // <-- REQ 2: Necesario para el portapapeles
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../theme/app_theme.dart';
@@ -6,8 +7,8 @@ import '../models/models.dart';
 import '../widgets/screen_wrapper.dart';
 
 class AssignmentsScreen extends StatefulWidget {
-  final List<Tutor> tutors; // Se mantienen para compatibilidad, pero usaremos _realTutors
-  final List<Student> students; // Se mantienen para compatibilidad, pero usaremos _realStudents
+  final List<Tutor> tutors; 
+  final List<Student> students; 
   final List<Career> careers;
   final void Function(Student, String) onReassign;
 
@@ -24,24 +25,20 @@ class AssignmentsScreen extends StatefulWidget {
 }
 
 class _AssignmentsScreenState extends State<AssignmentsScreen> {
-  // ── ESTADO PARA DATOS REALES ──────────────────────────────
   bool _isLoading = true;
   List<Tutor> _realTutors = [];
   List<Student> _realStudents = [];
-  // ──────────────────────────────────────────────────────────
+  List<Career> _apiCareers = [];
 
   String _searchQuery = '';
   String _filterCareer = 'Todas';
   String _filterMobility = 'Todas';
   String _filterTutor = 'Todos';
 
-  // ── Filtro de semestre ────────────────────────────────────
   String _filterSemestre = 'Todos';
   List<String> _semestres = ['Todos'];
   bool _loadingSemestres = false;
-  // ──────────────────────────────────────────────────────────
 
-  // Variables para paginación
   int _currentPage = 0;
   final int _itemsPerPage = 100;
 
@@ -49,10 +46,9 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
   void initState() {
     super.initState();
     _loadSemestres();
-    _fetchAsignacionesRealTime(); // Cargar datos reales de Postgres
+    _fetchAsignacionesRealTime(); 
   }
 
-  // ── Carga de semestres desde el backend ────────────────
   Future<void> _loadSemestres() async {
     setState(() => _loadingSemestres = true);
     try {
@@ -70,28 +66,85 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
         });
       }
     } catch (_) {
-      // Si falla la carga, el combo queda solo con 'Todos'
     } finally {
       setState(() => _loadingSemestres = false);
     }
   }
 
-  // ── Carga de asignaciones desde el backend ───────────────
   Future<void> _fetchAsignacionesRealTime() async {
+    setState(() => _isLoading = true);
     try {
+      final profRes = await http.get(
+        Uri.parse('http://127.0.0.1:8000/api/profesores'),
+        headers: {'Accept': 'application/json'}
+      );
+      
+      List<Tutor> fullTutorsList = [];
+      if (profRes.statusCode == 200) {
+        final List<dynamic> pData = jsonDecode(profRes.body);
+        fullTutorsList = pData.map((json) {
+          final nombre = json['nombre'] ?? '';
+          final apPat = json['apellido_paterno'] ?? '';
+          final apMat = json['apellido_materno'] ?? '';
+          final nombreCompleto = json['nombre_completo'] ?? '$nombre $apPat $apMat'.trim();
+          
+          final String tutorId = json['id']?.toString() 
+                ?? json['id_profesor']?.toString() 
+                ?? json['profesor_id']?.toString() 
+                ?? '';
+
+          List<String> carrerasList = [];
+          if (json['licenciaturas'] is List) {
+            for (var lic in json['licenciaturas']) {
+              if (lic is Map && lic.containsKey('abreviatura')) {
+                carrerasList.add(lic['abreviatura'].toString().trim());
+              } else if (lic is String) {
+                carrerasList.add(lic.trim());
+              }
+            }
+          }
+
+          return Tutor(
+            id: tutorId,
+            name: nombreCompleto.isEmpty ? 'Sin Nombre' : nombreCompleto,
+            department: 'Ingeniería',
+            careers: carrerasList,
+            isActive: json['estado'] == 'Activo',
+            students: [],
+          );
+        }).toList();
+      }
+
+      // REQ 1: Enviar el semestre seleccionado al backend como filtro dinámico
+      String url = 'http://127.0.0.1:8000/api/asignaciones/dashboard';
+      if (_filterSemestre != 'Todos') {
+        url += '?semestre=$_filterSemestre';
+      }
+
       final response = await http.get(
-        Uri.parse('http://127.0.0.1:8000/api/asignaciones/dashboard'),
+        Uri.parse(url),
         headers: {'Accept': 'application/json'},
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final List<dynamic> tutorsJson = data['tutores'] ?? [];
         
-        List<Tutor> loadedTutors = [];
+        List<Career> loadedCareers = [];
+        if (data['licenciaturas'] != null) {
+          loadedCareers = (data['licenciaturas'] as List).map((j) => Career(
+            id: j['id'].toString(), 
+            abbreviation: j['abreviatura'], 
+            name: j['nombre']
+          )).toList();
+        }
+
+        final List<dynamic> tutorsJson = data['tutores'] ?? [];
         List<Student> loadedStudents = [];
 
         for (var t in tutorsJson) {
+          final tId = t['id'].toString();
+          int tutorIdx = fullTutorsList.indexWhere((x) => x.id == tId);
+          
           List<Student> tutorStudents = [];
           
           if (t['grupos'] != null) {
@@ -100,6 +153,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                 for (var stud in grupo['tutorados']) {
                   var pivot = stud['pivot'] ?? {};
                   var movilidadDB = pivot['movilidad'] ?? 'no_cambiar';
+                  var estadoTutoradoDB = pivot['estado_tutorado'] ?? 'activo'; // Req 3
                   
                   MobilityFlag flag = MobilityFlag.noChange;
                   if (movilidadDB == 'cambiar') flag = MobilityFlag.canChange;
@@ -110,13 +164,14 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                     name: '${stud['nombre']} ${stud['apellido_paterno']} ${stud['apellido_materno'] ?? ''}'.trim(),
                     accountNumber: stud['numero_cuenta'].toString(),
                     entryPeriod: stud['periodo_ingreso'] ?? '',
-                    career: (t['licenciaturas'] != null && t['licenciaturas'].isNotEmpty) 
-                        ? t['licenciaturas'][0]['abreviatura'] 
+                    career: (stud['licenciatura'] != null) 
+                        ? stud['licenciatura']['abreviatura'] 
                         : 'N/A',
                     isReentry: flag != MobilityFlag.newStudent,
                     mobility: flag,
-                    tutorId: t['id'].toString(),
-                    isActive: stud['is_active'] == 1 || stud['is_active'] == true,
+                    tutorId: tId,
+                    isActive: estadoTutoradoDB == 'activo',
+                    wasReassigned: flag == MobilityFlag.canChange, 
                   );
                   tutorStudents.add(s);
                   loadedStudents.add(s);
@@ -125,20 +180,25 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
             }
           }
 
-          loadedTutors.add(Tutor(
-            id: t['id'].toString(),
-            name: '${t['nombre']} ${t['apellido_paterno']}',
-            department: 'Ingeniería',
-            careers: (t['licenciaturas'] != null) 
-                ? (t['licenciaturas'] as List).map((l) => l['abreviatura'] as String).toList() 
-                : [],
-            students: tutorStudents,
-            isActive: t['estado'] == 'Activo',
-          ));
+          if (tutorIdx != -1) {
+            fullTutorsList[tutorIdx].students.addAll(tutorStudents);
+          } else {
+            fullTutorsList.add(Tutor(
+              id: tId,
+              name: '${t['nombre']} ${t['apellido_paterno']}',
+              department: 'Ingeniería',
+              careers: (t['licenciaturas'] != null) 
+                  ? (t['licenciaturas'] as List).map((l) => l['abreviatura'] as String).toList() 
+                  : [],
+              students: tutorStudents,
+              isActive: t['estado'] == 'Activo',
+            ));
+          }
         }
 
         setState(() {
-          _realTutors = loadedTutors;
+          _apiCareers = loadedCareers;
+          _realTutors = fullTutorsList;
           _realStudents = loadedStudents;
           _isLoading = false;
         });
@@ -150,7 +210,48 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       setState(() => _isLoading = false);
     }
   }
-  // ──────────────────────────────────────────────────────────
+
+  Future<void> _saveStudentToBackend(String account, String fullName, String period, String careerAbrev, MobilityFlag mobility, String tutorId, bool isActive) async {
+    setState(() => _isLoading = true);
+
+    try {
+      final nameParts = fullName.split(' ');
+      final nombre = nameParts.isNotEmpty ? nameParts[0] : 'Sin nombre';
+      final apPaterno = nameParts.length > 1 ? nameParts[1] : '';
+      final apMaterno = nameParts.length > 2 ? nameParts.sublist(2).join(' ') : '';
+      
+      String movStr = 'no_cambiar';
+      if (mobility == MobilityFlag.canChange) movStr = 'cambiar';
+      if (mobility == MobilityFlag.newStudent) movStr = 'nuevo_ingreso';
+
+      final response = await http.post(
+        Uri.parse('http://127.0.0.1:8000/api/tutorados'),
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: jsonEncode({
+          'numero_cuenta': account.isEmpty ? DateTime.now().millisecondsSinceEpoch.toString().substring(5) : account,
+          'nombre': nombre,
+          'apellido_paterno': apPaterno,
+          'apellido_materno': apMaterno,
+          'periodo_ingreso': period.isEmpty ? 'N/A' : period,
+          'licenciatura_abreviatura': careerAbrev,
+          'tutor_id': tutorId,
+          'movilidad': movStr,
+          'estado_tutorado': isActive,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Guardado correctamente en la Base de Datos'), backgroundColor: AppTheme.green));
+        await _fetchAsignacionesRealTime(); 
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al guardar el alumno'), backgroundColor: AppTheme.red));
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error de conexión'), backgroundColor: AppTheme.red));
+      setState(() => _isLoading = false);
+    }
+  }
 
   List<Student> get _filtered {
     return _realStudents.where((s) {
@@ -162,14 +263,14 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       final matchMobility = _filterMobility == 'Todas' ||
           AppTheme.mobilityLabel(s.mobility) == _filterMobility;
       final matchTutor = _filterTutor == 'Todos' || s.tutorId == _filterTutor;
-      final matchSemestre = _filterSemestre == 'Todos' || s.entryPeriod == _filterSemestre;
-
-      return matchSearch && matchCareer && matchMobility && matchTutor && matchSemestre;
+      
+      // REQ 1: Eliminado el filtrado local por Semestre
+      return matchSearch && matchCareer && matchMobility && matchTutor;
     }).toList();
   }
 
   void _showReassignDialog(Student student) {
-    final available = _realTutors.where((t) => t.id != student.tutorId && t.count < 35).toList();
+    final available = _realTutors.where((t) => t.id != student.tutorId && t.isActive && t.students.where((st) => st.isActive).length < 35).toList();
     showDialog(
       context: context,
       builder: (_) => _ReassignDialog(
@@ -177,18 +278,15 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
         availableTutors: available,
         currentTutor: _realTutors.firstWhere((t) => t.id == student.tutorId),
         onReassign: (newId) {
-          // Lógica local (luego la conectaremos a un UPDATE en Laravel)
-          setState(() {
-            final oldTutor = _realTutors.firstWhere((t) => t.id == student.tutorId);
-            final newTutor = _realTutors.firstWhere((t) => t.id == newId);
-            
-            student.previousTutorId = student.tutorId;
-            student.tutorId = newId;
-            student.wasReassigned = true;
-
-            oldTutor.students.remove(student);
-            newTutor.students.add(student);
-          });
+          _saveStudentToBackend(
+            student.accountNumber,
+            student.name,
+            student.entryPeriod,
+            student.career,
+            MobilityFlag.canChange, 
+            newId,
+            student.isActive
+          );
         },
       ),
     );
@@ -200,50 +298,9 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       builder: (_) => _StudentDialog(
         student: student,
         tutors: _realTutors,
-        careersCatalog: widget.careers,
+        careersCatalog: _apiCareers,
         onSave: (id, name, account, period, career, mobility, tutorId, isActive) {
-          setState(() {
-            if (student == null) {
-              final newStudent = Student(
-                id: id,
-                name: name,
-                accountNumber: account,
-                entryPeriod: period,
-                career: career,
-                isReentry: mobility != MobilityFlag.newStudent,
-                mobility: mobility,
-                tutorId: tutorId,
-                isActive: isActive,
-              );
-              _realStudents.add(newStudent);
-              _realTutors.firstWhere((t) => t.id == tutorId).students.add(newStudent);
-            } else {
-              final index = _realStudents.indexOf(student);
-              if (index != -1) {
-                final updatedStudent = Student(
-                  id: student.id,
-                  name: name,
-                  accountNumber: account,
-                  entryPeriod: period,
-                  career: career,
-                  isReentry: student.isReentry,
-                  mobility: mobility,
-                  tutorId: tutorId,
-                  previousTutorId: student.tutorId != tutorId
-                      ? student.tutorId
-                      : student.previousTutorId,
-                  wasReassigned: student.tutorId != tutorId || student.wasReassigned,
-                  isActive: isActive,
-                );
-                _realStudents[index] = updatedStudent;
-
-                if (student.tutorId != tutorId) {
-                  _realTutors.firstWhere((t) => t.id == student.tutorId).students.remove(student);
-                  _realTutors.firstWhere((t) => t.id == tutorId).students.add(updatedStudent);
-                }
-              }
-            }
-          });
+          _saveStudentToBackend(account, name, period, career, mobility, tutorId, isActive);
         },
       ),
     );
@@ -254,8 +311,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: AppTheme.surface,
-        title: const Text('Eliminar Alumno', style: TextStyle(color: AppTheme.textPrimary)),
-        content: Text('¿Estás seguro de eliminar a ${student.name}?', style: const TextStyle(color: AppTheme.textSecondary)),
+        title: const Text('Desactivar Alumno', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text('¿Deseas marcar a ${student.name} como "Baja"?', style: const TextStyle(color: AppTheme.textSecondary)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
@@ -264,19 +321,18 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
             style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.red, foregroundColor: Colors.white),
             onPressed: () {
-              setState(() {
-                _realStudents.remove(student);
-                _realTutors.firstWhere((t) => t.id == student.tutorId).students.remove(student);
-
-                final filteredCount = _filtered.length;
-                final totalPages = (filteredCount / _itemsPerPage).ceil();
-                if (_currentPage >= totalPages && totalPages > 0) {
-                  _currentPage = totalPages - 1;
-                }
-              });
               Navigator.pop(context);
+              _saveStudentToBackend(
+                student.accountNumber,
+                student.name,
+                student.entryPeriod,
+                student.career,
+                student.mobility, 
+                student.tutorId,
+                false 
+              );
             },
-            child: const Text('Eliminar'),
+            child: const Text('Desactivar'),
           ),
         ],
       ),
@@ -289,10 +345,10 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       builder: (_) => _QuickChangeDialog<String>(
         title: 'Cambiar Licenciatura',
         currentValue: student.career,
-        options: widget.careers.map((c) => c.abbreviation).toList(),
+        options: _apiCareers.map((c) => c.abbreviation).toList(),
         labelBuilder: (val) => val,
         onSave: (newCareer) {
-          setState(() => student.career = newCareer);
+          _saveStudentToBackend(student.accountNumber, student.name, student.entryPeriod, newCareer, student.mobility, student.tutorId, student.isActive);
         },
       ),
     );
@@ -307,7 +363,136 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
         options: MobilityFlag.values,
         labelBuilder: (val) => AppTheme.mobilityLabel(val),
         onSave: (newMobility) {
-          setState(() => student.mobility = newMobility);
+           _saveStudentToBackend(student.accountNumber, student.name, student.entryPeriod, student.career, newMobility, student.tutorId, student.isActive);
+        },
+      ),
+    );
+  }
+
+  // <-- REQ 2: Lógica para la ventana "Copiar Grupos" -->
+  void _showCopyGroupsDialog() {
+    String localSearchQuery = '';
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          // Filtrar tutores basados en la búsqueda local
+          final filteredTutors = _realTutors.where((t) {
+            return localSearchQuery.isEmpty || t.name.toLowerCase().contains(localSearchQuery.toLowerCase());
+          }).toList();
+
+          return Dialog(
+            backgroundColor: AppTheme.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Container(
+              width: 500,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Copiar Grupos de Tutores', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  
+                  TextField(
+                    onChanged: (v) => setModalState(() => localSearchQuery = v),
+                    style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar profesor...',
+                      hintStyle: const TextStyle(color: AppTheme.textSecondary),
+                      prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary, size: 18),
+                      filled: true,
+                      fillColor: AppTheme.bg,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    height: 350,
+                    child: filteredTutors.isEmpty
+                        ? const Center(child: Text('No se encontraron profesores', style: TextStyle(color: AppTheme.textSecondary)))
+                        : ListView.separated(
+                            itemCount: filteredTutors.length,
+                            separatorBuilder: (_, __) => const SizedBox(height: 12),
+                            itemBuilder: (_, i) {
+                              final t = filteredTutors[i];
+                              // Solo tomar los alumnos activos de este tutor
+                              final activeStudents = t.students.where((st) => st.isActive).toList();
+                              
+                              // Construir el string de cuentas (req 2)
+                              String cuentasText = '';
+                              for (int j = 0; j < activeStudents.length; j++) {
+                                cuentasText += activeStudents[j].accountNumber;
+                                if (j < activeStudents.length - 1) {
+                                  cuentasText += ',\n';
+                                }
+                              }
+
+                              return Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.bg,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(child: Text(t.name, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 14))),
+                                        IconButton(
+                                          icon: const Icon(Icons.copy_rounded, color: AppTheme.accent, size: 18),
+                                          tooltip: 'Copiar al portapapeles',
+                                          onPressed: () {
+                                            Clipboard.setData(ClipboardData(text: cuentasText)).then((_) {
+                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copiado al portapapeles'), backgroundColor: AppTheme.green));
+                                            });
+                                          },
+                                        )
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.surfaceLight,
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: AppTheme.border),
+                                      ),
+                                      // TextField de solo lectura con scroll para las cuentas
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(maxHeight: 100),
+                                        child: SingleChildScrollView(
+                                          child: Text(
+                                            cuentasText.isEmpty ? 'Sin alumnos asignados' : cuentasText,
+                                            style: const TextStyle(color: AppTheme.textSecondary, fontFamily: 'monospace', fontSize: 12),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cerrar', style: TextStyle(color: AppTheme.textSecondary)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
         },
       ),
     );
@@ -317,14 +502,13 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
   Widget build(BuildContext context) {
     final filtered = _filtered;
 
-    // Cálculo de paginación
     final totalPages = (filtered.length / _itemsPerPage).ceil();
     if (_currentPage >= totalPages && totalPages > 0) {
       _currentPage = totalPages - 1;
     }
     final paginatedStudents = filtered.skip(_currentPage * _itemsPerPage).take(_itemsPerPage).toList();
 
-    final careerOptions = ['Todas', ...widget.careers.map((c) => c.abbreviation)];
+    final careerOptions = ['Todas', ..._apiCareers.map((c) => c.abbreviation)];
     final mobilities = ['Todas', 'Nuevo Ingreso', 'Sí Cambiar', 'No Cambiar'];
 
     final availableTutorsForFilter = _filterCareer == 'Todas'
@@ -341,7 +525,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       subtitle: 'Gestión manual de asignaciones. ${filtered.length} registros en total.',
       scrollable: false,
       child: Column(children: [
-        // Barra de Filtros y Alta
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -370,7 +553,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               ),
               const SizedBox(width: 16),
               
-              // ── NUEVO: BOTÓN DE REFRESCAR ──
               IconButton(
                 onPressed: () {
                   setState(() => _isLoading = true);
@@ -426,6 +608,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               const SizedBox(width: 10),
               Expanded(
                   child: DropdownButtonFormField<String>(
+                isExpanded: true,
                 value: _filterTutor,
                 decoration: InputDecoration(
                     labelText: 'Tutor',
@@ -460,6 +643,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                             _filterSemestre = v ?? 'Todos';
                             _currentPage = 0;
                           });
+                          // REQ 1: Trigger de búsqueda remota al cambiar combo de semestre
+                          _fetchAsignacionesRealTime();
                         },
                       ),
               ),
@@ -485,7 +670,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
           ]),
         ),
 
-        // Cuerpo de la Tabla
         Expanded(
             child: Container(
           decoration: BoxDecoration(
@@ -506,6 +690,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                         orElse: () => _realTutors.first);
                     final mobilityColor = AppTheme.mobilityColor(s.mobility);
                     final isLocked = s.mobility == MobilityFlag.noChange;
+
+                    final activeStudentsCount = tutor.students.where((st) => st.isActive).length;
 
                     return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -580,11 +766,22 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Text(tutor.name,
-                                        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
-                                        overflow: TextOverflow.ellipsis),
+                                    Row(
+                                      children: [
+                                        if (!tutor.isActive)
+                                          const Padding(
+                                            padding: EdgeInsets.only(right: 6.0),
+                                            child: Icon(Icons.warning_amber_rounded, color: AppTheme.red, size: 14),
+                                          ),
+                                        Expanded(
+                                          child: Text(tutor.name,
+                                              style: TextStyle(color: tutor.isActive ? AppTheme.textPrimary : AppTheme.red, fontSize: 12),
+                                              overflow: TextOverflow.ellipsis),
+                                        ),
+                                      ],
+                                    ),
                                     Row(children: [
-                                      Text('${tutor.count} alumnos • ',
+                                      Text('$activeStudentsCount alumnos • ',
                                           style: TextStyle(color: AppTheme.statusColor(tutor.status), fontSize: 10)),
                                       Text(tutor.isActive ? 'Activo' : 'Baja',
                                           style: TextStyle(
@@ -683,7 +880,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                                     onPressed: () => _deleteStudent(s),
                                     icon: const Icon(Icons.delete_outline_rounded, size: 16),
                                     color: AppTheme.red,
-                                    tooltip: 'Eliminar',
+                                    tooltip: 'Eliminar / Baja',
                                     constraints: const BoxConstraints(),
                                     padding: const EdgeInsets.all(8)),
                               ],
@@ -716,11 +913,14 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                           style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 12)),
                       Text('En la columna Estado, ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                       Text('M', style: TextStyle(color: AppTheme.green, fontWeight: FontWeight.w800, fontSize: 12)),
-                      Text(' = Mantener (Sin cambios)  |  ',
+                      Text(' = Mantener  |  ',
                           style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                       Text('C', style: TextStyle(color: AppTheme.yellow, fontWeight: FontWeight.w800, fontSize: 12)),
-                      Text(' = Cambiar (Reasignado a un tutor distinto)',
+                      Text(' = Cambiar  |  ',
                           style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                      Icon(Icons.warning_amber_rounded, color: AppTheme.red, size: 14),
+                      Text(' = Tutor dado de baja',
+                          style: TextStyle(color: AppTheme.red, fontSize: 12)),
                     ],
                   ),
                 ),
@@ -759,10 +959,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
   }
 }
 
-// ==============================================================================
-// UTILS
-// ==============================================================================
-
 class _TableHeader extends StatelessWidget {
   final String label;
   final bool alignRight;
@@ -786,6 +982,7 @@ class _DropdownFilter<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<T>(
+      isExpanded: true,
       value: value,
       decoration: InputDecoration(
           labelText: label,
@@ -801,10 +998,6 @@ class _DropdownFilter<T> extends StatelessWidget {
     );
   }
 }
-
-// ==============================================================================
-// DIALOGS
-// ==============================================================================
 
 class _QuickChangeDialog<T> extends StatefulWidget {
   final String title;
@@ -839,6 +1032,7 @@ class _QuickChangeDialogState<T> extends State<_QuickChangeDialog<T>> {
       content: SizedBox(
         width: 300,
         child: DropdownButtonFormField<T>(
+          isExpanded: true, 
           value: _selectedValue,
           decoration: InputDecoration(
             filled: true,
@@ -849,7 +1043,7 @@ class _QuickChangeDialogState<T> extends State<_QuickChangeDialog<T>> {
           items: widget.options
               .map((o) => DropdownMenuItem(
                   value: o,
-                  child: Text(widget.labelBuilder(o), style: const TextStyle(color: AppTheme.textPrimary))))
+                  child: Text(widget.labelBuilder(o), style: const TextStyle(color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)))
               .toList(),
           onChanged: (v) => setState(() => _selectedValue = v as T),
         ),
@@ -869,7 +1063,7 @@ class _QuickChangeDialogState<T> extends State<_QuickChangeDialog<T>> {
   }
 }
 
-class _ReassignDialog extends StatelessWidget {
+class _ReassignDialog extends StatefulWidget {
   final Student student;
   final List<Tutor> availableTutors;
   final Tutor currentTutor;
@@ -879,7 +1073,18 @@ class _ReassignDialog extends StatelessWidget {
       {required this.student, required this.availableTutors, required this.currentTutor, required this.onReassign});
 
   @override
+  State<_ReassignDialog> createState() => _ReassignDialogState();
+}
+
+class _ReassignDialogState extends State<_ReassignDialog> {
+  String _searchQuery = '';
+
+  @override
   Widget build(BuildContext context) {
+    final filteredTutors = widget.availableTutors.where((t) {
+      return _searchQuery.isEmpty || t.name.toLowerCase().contains(_searchQuery.toLowerCase());
+    }).toList();
+
     return Dialog(
       backgroundColor: AppTheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -898,7 +1103,7 @@ class _ReassignDialog extends StatelessWidget {
                 const SizedBox(width: 14),
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       const Text('Reasignar Alumno', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700, fontSize: 18)),
-                      Text(student.name, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13))
+                      Text(widget.student.name, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13))
                     ]),
                 const Spacer(),
                 IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded, color: AppTheme.textSecondary)),
@@ -909,60 +1114,84 @@ class _ReassignDialog extends StatelessWidget {
                   decoration: BoxDecoration(color: AppTheme.bg, borderRadius: BorderRadius.circular(12)),
                   child: Row(children: [
                     const Text('Tutor actual: ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                    Text(currentTutor.name, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
-                    const Spacer(),
-                    Text('${currentTutor.count} alumnos', style: TextStyle(color: AppTheme.statusColor(currentTutor.status), fontSize: 12))
+                    Expanded(
+                      child: Text(widget.currentTutor.name, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis),
+                    ),
+                    Text('${widget.currentTutor.students.where((st)=>st.isActive).length} alumnos', style: TextStyle(color: AppTheme.statusColor(widget.currentTutor.status), fontSize: 12))
                   ])),
               const SizedBox(height: 20),
+              
+              TextField(
+                onChanged: (v) => setState(() => _searchQuery = v),
+                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'Buscar tutor...',
+                  hintStyle: const TextStyle(color: AppTheme.textSecondary),
+                  prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary, size: 18),
+                  filled: true,
+                  fillColor: AppTheme.bg,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+              ),
+              const SizedBox(height: 16),
+              
               const Text('Tutores disponibles',
                   style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
               const SizedBox(height: 10),
-              if (availableTutors.isEmpty)
-                const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('No hay tutores con capacidad disponible.', style: TextStyle(color: AppTheme.textSecondary)))
-              else
-                ...availableTutors.map((t) {
-                  final color = AppTheme.statusColor(t.status);
-                  final spotsLeft = 35 - t.count;
-                  return GestureDetector(
-                    onTap: () {
-                      onReassign(t.id);
-                      Navigator.pop(context);
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                          color: AppTheme.surfaceLight,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: color.withOpacity(0.3))),
-                      child: Row(children: [
-                        Container(
-                            width: 36, height: 36,
-                            decoration: BoxDecoration(color: color.withOpacity(0.15), shape: BoxShape.circle),
-                            child: Center(
-                                child: Text(t.name.split(' ').last[0], style: TextStyle(color: color, fontWeight: FontWeight.w800)))),
-                        const SizedBox(width: 14),
-                        Expanded(
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                              Text(t.name, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
-                              Text(t.careers.join(' · '), style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11))
-                            ])),
-                        Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text('${t.count}', style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.w800)),
-                              Text(spotsLeft > 0 ? '+$spotsLeft espacios' : 'lleno', style: TextStyle(color: color.withOpacity(0.7), fontSize: 10))
-                            ]),
-                        const SizedBox(width: 10),
-                        const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppTheme.textSecondary),
-                      ]),
-                    ),
-                  );
-                }),
+              
+              SizedBox(
+                height: 300,
+                child: filteredTutors.isEmpty
+                    ? const Center(child: Text('No se encontraron tutores.', style: TextStyle(color: AppTheme.textSecondary)))
+                    : ListView.builder(
+                        itemCount: filteredTutors.length,
+                        itemBuilder: (context, index) {
+                          final t = filteredTutors[index];
+                          final color = AppTheme.statusColor(t.status);
+                          final activeCount = t.students.where((st)=>st.isActive).length;
+                          final spotsLeft = 35 - activeCount;
+                          
+                          return GestureDetector(
+                            onTap: () {
+                              widget.onReassign(t.id);
+                              Navigator.pop(context);
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                  color: AppTheme.surfaceLight,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: color.withOpacity(0.3))),
+                              child: Row(children: [
+                                Container(
+                                    width: 36, height: 36,
+                                    decoration: BoxDecoration(color: color.withOpacity(0.15), shape: BoxShape.circle),
+                                    child: Center(
+                                        child: Text(t.name.split(' ').last[0], style: TextStyle(color: color, fontWeight: FontWeight.w800)))),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                    child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                      Text(t.name, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis),
+                                      Text(t.careers.join(' · '), style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11))
+                                    ])),
+                                Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text('$activeCount', style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.w800)),
+                                      Text(spotsLeft > 0 ? '+$spotsLeft espacios' : 'lleno', style: TextStyle(color: color.withOpacity(0.7), fontSize: 10))
+                                    ]),
+                                const SizedBox(width: 10),
+                                const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppTheme.textSecondary),
+                              ]),
+                            ),
+                          );
+                        },
+                      ),
+              ),
             ]),
       ),
     );
@@ -1010,13 +1239,105 @@ class _StudentDialogState extends State<_StudentDialog> {
         : (widget.careersCatalog.isNotEmpty ? widget.careersCatalog.first.abbreviation : '');
 
     _selectedMobility = s?.mobility ?? MobilityFlag.newStudent;
-    _selectedTutorId = s?.tutorId ?? (widget.tutors.isNotEmpty ? widget.tutors.first.id : '');
+    
+    final activeTutors = widget.tutors.where((t) => t.isActive).toList();
+    
+    _selectedTutorId = s?.tutorId ?? (activeTutors.isNotEmpty ? activeTutors.first.id : '');
+    
+    if (s?.tutorId != null && !activeTutors.any((t) => t.id == s?.tutorId)) {
+        final assignedTutor = widget.tutors.firstWhere((t) => t.id == s?.tutorId, orElse: () => Tutor(id: s!.tutorId, name: 'Desconocido', department: '', careers: []));
+        activeTutors.add(assignedTutor);
+    }
+    
     _isActive = s?.isActive ?? true;
+  }
+
+  void _showTutorSelection(List<Tutor> activeTutors) {
+    String localSearchQuery = '';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final filteredTutors = activeTutors.where((t) {
+            return localSearchQuery.isEmpty || t.name.toLowerCase().contains(localSearchQuery.toLowerCase());
+          }).toList();
+
+          return Dialog(
+            backgroundColor: AppTheme.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Container(
+              width: 400,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Seleccionar Tutor', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  
+                  TextField(
+                    onChanged: (v) => setModalState(() => localSearchQuery = v),
+                    style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar tutor...',
+                      hintStyle: const TextStyle(color: AppTheme.textSecondary),
+                      prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary, size: 18),
+                      filled: true,
+                      fillColor: AppTheme.bg,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    height: 300,
+                    child: filteredTutors.isEmpty
+                        ? const Center(child: Text('No se encontraron tutores', style: TextStyle(color: AppTheme.textSecondary)))
+                        : ListView.separated(
+                            itemCount: filteredTutors.length,
+                            separatorBuilder: (_, __) => const Divider(color: AppTheme.border),
+                            itemBuilder: (_, i) {
+                              final t = filteredTutors[i];
+                              return ListTile(
+                                title: Text(t.name, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
+                                subtitle: Text('${t.students.where((st)=>st.isActive).length} alumnos asignados', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                                onTap: () {
+                                  setState(() => _selectedTutorId = t.id);
+                                  Navigator.pop(ctx);
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cancelar', style: TextStyle(color: AppTheme.textSecondary)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.student != null;
+    
+    final activeTutors = widget.tutors.where((t) => t.isActive).toList();
+    
+    if (isEdit && _selectedTutorId.isNotEmpty && !activeTutors.any((t) => t.id == _selectedTutorId)) {
+      final assignedTutor = widget.tutors.firstWhere((t) => t.id == _selectedTutorId, orElse: () => Tutor(id: _selectedTutorId, name: 'Desconocido (Baja)', department: '', careers: []));
+      activeTutors.insert(0, assignedTutor);
+    }
 
     return Dialog(
       backgroundColor: AppTheme.surface,
@@ -1053,11 +1374,12 @@ class _StudentDialogState extends State<_StudentDialog> {
               const SizedBox(height: 16),
 
               DropdownButtonFormField<String>(
+                isExpanded: true, 
                 value: _selectedCareer.isEmpty ? null : _selectedCareer,
                 decoration: _inputDeco('Licenciatura'),
                 dropdownColor: AppTheme.surfaceLight,
                 items: widget.careersCatalog
-                    .map((c) => DropdownMenuItem(value: c.abbreviation, child: Text(c.abbreviation, style: const TextStyle(color: AppTheme.textPrimary))))
+                    .map((c) => DropdownMenuItem(value: c.abbreviation, child: Text(c.abbreviation, style: const TextStyle(color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)))
                     .toList(),
                 onChanged: (v) => setState(() => _selectedCareer = v!),
               ),
@@ -1065,23 +1387,33 @@ class _StudentDialogState extends State<_StudentDialog> {
 
               Row(children: [
                 Expanded(
-                    child: DropdownButtonFormField<String>(
-                  value: _selectedTutorId.isEmpty ? null : _selectedTutorId,
-                  decoration: _inputDeco('Tutor Asignado'),
-                  dropdownColor: AppTheme.surfaceLight,
-                  items: widget.tutors
-                      .map((t) => DropdownMenuItem(value: t.id, child: Text(t.name, style: const TextStyle(color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)))
-                      .toList(),
-                  onChanged: (v) => setState(() => _selectedTutorId = v!),
-                )),
+                  child: InkWell(
+                    onTap: () => _showTutorSelection(activeTutors),
+                    child: InputDecorator(
+                      decoration: _inputDeco('Tutor Asignado (Activos)'),
+                      child: Text(
+                        activeTutors.any((t) => t.id == _selectedTutorId)
+                            ? activeTutors.firstWhere((t) => t.id == _selectedTutorId).name
+                            : 'Seleccionar Tutor...',
+                        style: TextStyle(
+                          color: _selectedTutorId.isEmpty ? AppTheme.textSecondary : AppTheme.textPrimary,
+                          fontSize: 13,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                     child: DropdownButtonFormField<MobilityFlag>(
+                  isExpanded: true, 
                   value: _selectedMobility,
                   decoration: _inputDeco('Movilidad'),
                   dropdownColor: AppTheme.surfaceLight,
                   items: MobilityFlag.values
-                      .map((m) => DropdownMenuItem(value: m, child: Text(AppTheme.mobilityLabel(m), style: const TextStyle(color: AppTheme.textPrimary))))
+                      .map((m) => DropdownMenuItem(value: m, child: Text(AppTheme.mobilityLabel(m), style: const TextStyle(color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)))
                       .toList(),
                   onChanged: (v) => setState(() => _selectedMobility = v!),
                 )),
@@ -1105,6 +1437,10 @@ class _StudentDialogState extends State<_StudentDialog> {
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent),
                   onPressed: () {
+                    if (_selectedTutorId.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, selecciona un tutor asignado')));
+                      return;
+                    }
                     final fullName = [
                       _nombreCtrl.text.trim(),
                       _apPaternoCtrl.text.trim(),

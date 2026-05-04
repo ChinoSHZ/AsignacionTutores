@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:file_picker/file_picker.dart'; // <-- NUEVA IMPORTACIÓN
 import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../widgets/screen_wrapper.dart';
@@ -21,6 +22,7 @@ class _TutorsScreenState extends State<TutorsScreen> {
   bool _isLoading = true;
   String _errorMessage = '';
   List<Tutor> _apiTutors = [];
+  List<Career> _apiCareers = [];
   
   int _currentPage = 0;
   final int _itemsPerPage = 100;
@@ -38,6 +40,20 @@ class _TutorsScreenState extends State<TutorsScreen> {
     });
 
     try {
+      final careersRes = await http.get(
+        Uri.parse('http://127.0.0.1:8000/api/licenciaturas'),
+        headers: {'Accept': 'application/json'},
+      );
+
+      if (careersRes.statusCode == 200) {
+        final List<dynamic> cData = jsonDecode(careersRes.body);
+        _apiCareers = cData.map((j) => Career(
+          id: j['id'].toString(), 
+          abbreviation: j['abreviatura'], 
+          name: j['nombre']
+        )).toList();
+      }
+
       final response = await http.get(
         Uri.parse('http://127.0.0.1:8000/api/profesores'),
         headers: {'Accept': 'application/json'},
@@ -148,6 +164,45 @@ class _TutorsScreenState extends State<TutorsScreen> {
     }
   }
 
+  // <-- NUEVO: Función para subir y procesar el archivo Excel -->
+  Future<void> _uploadExcel() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx', 'xls', 'csv'],
+    );
+
+    if (result != null) {
+      setState(() => _isLoading = true);
+      try {
+        var request = http.MultipartRequest(
+          'POST',
+          Uri.parse('http://127.0.0.1:8000/api/profesores/excel'),
+        );
+
+        final file = result.files.first;
+        if (file.bytes != null) {
+          request.files.add(http.MultipartFile.fromBytes('file', file.bytes!, filename: file.name));
+        } else if (file.path != null) {
+          request.files.add(await http.MultipartFile.fromPath('file', file.path!));
+        }
+
+        var streamedResponse = await request.send();
+        var response = await http.Response.fromStream(streamedResponse);
+
+        if (response.statusCode == 200) {
+          _mostrarSnackBar('Lista de tutores actualizada desde Excel exitosamente', AppTheme.green);
+          await _fetchTutorsFromBackend();
+        } else {
+          _mostrarSnackBar('Error al procesar el archivo Excel en el servidor', AppTheme.red);
+        }
+      } catch (e) {
+        _mostrarSnackBar('Error de conexión durante la subida', AppTheme.red);
+      } finally {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
   void _mostrarSnackBar(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg, style: const TextStyle(color: Colors.white)), backgroundColor: color));
   }
@@ -197,7 +252,7 @@ class _TutorsScreenState extends State<TutorsScreen> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: widget.careers.map((c) {
+                      children: _apiCareers.map((c) {
                         final abrev = c.abbreviation.trim();
                         final isSelected = selectedCareers.contains(abrev);
                         return FilterChip(
@@ -305,7 +360,7 @@ class _TutorsScreenState extends State<TutorsScreen> {
   @override
   Widget build(BuildContext context) {
     final Set<String> allCareers = {'Todas'};
-    for (var c in widget.careers) {
+    for (var c in _apiCareers) {
       allCareers.add(c.abbreviation);
     }
 
@@ -356,6 +411,17 @@ class _TutorsScreenState extends State<TutorsScreen> {
                 _currentPage = 0; 
               })),
               const Spacer(),
+              
+              // <-- NUEVO: Botón "Añadir con Excel" -->
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3498DB), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16)),
+                icon: const Icon(Icons.upload_file_rounded, color: Colors.white),
+                label: const Text('Añadir con Excel', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                onPressed: () => _uploadExcel(),
+              ),
+              
+              const SizedBox(width: 16),
+
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(backgroundColor: AppTheme.green, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16)),
                 icon: const Icon(Icons.person_add_rounded, color: Colors.white),
@@ -365,64 +431,106 @@ class _TutorsScreenState extends State<TutorsScreen> {
             ],
           ),
           const SizedBox(height: 24),
+
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceLight,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: const Row(children: [
+              Expanded(flex: 3, child: Text('Nombre del profesor', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5))),
+              Expanded(flex: 2, child: Text('Licenciatura', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5))),
+              Expanded(flex: 1, child: Text('Estado', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5))),
+              SizedBox(width: 100, child: Text('Acciones', textAlign: TextAlign.right, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5))),
+            ]),
+          ),
+
           if (_isLoading)
-            const Center(child: CircularProgressIndicator(color: AppTheme.accent))
+            const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(color: AppTheme.accent)))
           else if (_errorMessage.isNotEmpty)
-            Center(child: Text(_errorMessage, style: const TextStyle(color: AppTheme.red)))
+            Center(child: Padding(padding: EdgeInsets.all(20), child: Text(_errorMessage, style: const TextStyle(color: AppTheme.red))))
           else
             Column(
               children: [
-                ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: paginatedTutors.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final t = paginatedTutors[index];
-                    return Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.border)),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 42, height: 42,
-                            decoration: BoxDecoration(color: t.isActive ? AppTheme.accent.withValues(alpha: 0.15) : AppTheme.surfaceLight, shape: BoxShape.circle),
-                            child: Center(child: Text(t.name[0], style: TextStyle(color: t.isActive ? AppTheme.accentLight : AppTheme.textSecondary, fontWeight: FontWeight.bold, fontSize: 16))),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            flex: 2,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(t.name, style: TextStyle(color: t.isActive ? AppTheme.textPrimary : AppTheme.textSecondary, fontSize: 14, fontWeight: FontWeight.w600)),
-                                const SizedBox(height: 4),
-                                Text(t.email, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
-                              ],
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                    border: Border.all(color: AppTheme.border),
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: paginatedTutors.length,
+                    separatorBuilder: (_, __) => const Divider(color: AppTheme.border, height: 0),
+                    itemBuilder: (context, index) {
+                      final t = paginatedTutors[index];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 42, height: 42,
+                                    decoration: BoxDecoration(color: t.isActive ? AppTheme.accent.withValues(alpha: 0.15) : AppTheme.surfaceLight, shape: BoxShape.circle),
+                                    child: Center(child: Text(t.name[0], style: TextStyle(color: t.isActive ? AppTheme.accentLight : AppTheme.textSecondary, fontWeight: FontWeight.bold, fontSize: 16))),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(t.name, style: TextStyle(color: t.isActive ? AppTheme.textPrimary : AppTheme.textSecondary, fontSize: 14, fontWeight: FontWeight.w600)),
+                                        const SizedBox(height: 4),
+                                        Text(t.email, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          Expanded(
-                            child: Wrap(
-                              spacing: 6,
-                              children: t.careers.map((c) => Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(color: AppTheme.bg, borderRadius: BorderRadius.circular(6), border: Border.all(color: AppTheme.border)),
-                                child: Text(c, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.w600)),
-                              )).toList(),
+                            Expanded(
+                              flex: 2,
+                              child: Wrap(
+                                spacing: 6,
+                                children: t.careers.map((c) => Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(color: AppTheme.bg, borderRadius: BorderRadius.circular(6), border: Border.all(color: AppTheme.border)),
+                                  child: Text(c, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.w600)),
+                                )).toList(),
+                              ),
                             ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(color: t.isActive ? AppTheme.green.withValues(alpha: 0.1) : AppTheme.red.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
-                            child: Text(t.isActive ? 'Activo' : 'Inactivo', style: TextStyle(color: t.isActive ? AppTheme.green : AppTheme.red, fontSize: 11, fontWeight: FontWeight.w600)),
-                          ),
-                          const SizedBox(width: 16),
-                          IconButton(icon: const Icon(Icons.edit_rounded, color: AppTheme.yellow, size: 20), onPressed: () => _showFormModal(tutor: t)),
-                          IconButton(icon: const Icon(Icons.delete_outline_rounded, color: AppTheme.red, size: 20), onPressed: () => _confirmDelete(t)),
-                        ],
-                      ),
-                    );
-                  },
+                            Expanded(
+                              flex: 1,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(color: t.isActive ? AppTheme.green.withValues(alpha: 0.1) : AppTheme.red.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
+                                  child: Text(t.isActive ? 'Activo' : 'Inactivo', style: TextStyle(color: t.isActive ? AppTheme.green : AppTheme.red, fontSize: 11, fontWeight: FontWeight.w600)),
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: 100,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  IconButton(icon: const Icon(Icons.edit_rounded, color: AppTheme.yellow, size: 20), onPressed: () => _showFormModal(tutor: t)),
+                                  IconButton(icon: const Icon(Icons.delete_outline_rounded, color: AppTheme.red, size: 20), onPressed: () => _confirmDelete(t)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
                 if (totalPages > 0) 
                   Padding(
