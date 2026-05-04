@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../data/mock_data.dart';
@@ -36,7 +38,11 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   Screen _current = Screen.dashboard;
+  bool _isNavigating = false;
   
+  String _userName = 'Cargando...';
+  bool _showAlert = false;
+
   final List<Tutor> tutors = mockTutors;
   final List<Student> students = mockStudents;
   final List<Career> careers = mockCareers;
@@ -53,6 +59,68 @@ class _MainShellState extends State<MainShell> {
     tutors[2].students = students.where((s) => s.tutorId == 't3').take(31).toList();
     tutors[3].students = students.where((s) => s.tutorId == 't4').take(43).toList();
     tutors[4].students = students.where((s) => s.tutorId == 't5').take(18).toList();
+
+    _fetchSidebarData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Recuperamos el nombre enviado desde el Login
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args is Map<String, dynamic> && args.containsKey('user_name')) {
+      setState(() => _userName = args['user_name']);
+    } else if (_userName == 'Cargando...') {
+      setState(() => _userName = 'Administrador');
+    }
+  }
+
+  Future<void> _fetchSidebarData() async {
+    // 1. Obtener Datos del Dashboard para verificar el estado Crítico/Desvío
+    try {
+      final resDash = await http.get(Uri.parse('http://127.0.0.1:8000/api/asignaciones/dashboard'), headers: {'Accept': 'application/json'});
+      if (resDash.statusCode == 200) {
+        final data = jsonDecode(resDash.body);
+        final List<dynamic> tutorsJson = data['tutores'] ?? [];
+        
+        int totalAlumnos = 0;
+        List<int> activeCounts = [];
+
+        for (var t in tutorsJson) {
+          int activeCount = 0;
+          if (t['grupos'] != null) {
+            for (var grupo in t['grupos']) {
+              if (grupo['tutorados'] != null) {
+                for (var stud in grupo['tutorados']) {
+                  var pivot = stud['pivot'] ?? {};
+                  if (pivot['estado_tutorado'] == 'activo' || stud['is_active'] == 1 || stud['is_active'] == true) {
+                    activeCount++;
+                    totalAlumnos++;
+                  }
+                }
+              }
+            }
+          }
+          activeCounts.add(activeCount);
+        }
+
+        int average = activeCounts.isNotEmpty ? (totalAlumnos / activeCounts.length).round() : 30;
+        int minBalanced = average - 3;
+        int maxBalanced = average + 3;
+
+        bool hasAlert = false;
+        for (int count in activeCounts) {
+          if (count < minBalanced || count > maxBalanced) {
+            hasAlert = true;
+            break;
+          }
+        }
+
+        if (mounted) setState(() => _showAlert = hasAlert);
+      }
+    } catch (e) {
+      // Manejo silencioso
+    }
   }
 
   void _reassign(Student student, String newTutorId) {
@@ -66,18 +134,79 @@ class _MainShellState extends State<MainShell> {
     });
   }
 
+  void _handleNavigation(Screen s) async {
+    if (s == Screen.logout) {
+      bool hasRealUser = true;
+      try {
+        final response = await http.get(Uri.parse('http://127.0.0.1:8000/api/usuarios'), headers: {'Accept': 'application/json'});
+        if (response.statusCode == 200) {
+          final List<dynamic> users = jsonDecode(response.body);
+          hasRealUser = users.any((u) => u['email'] != 'admin@admin.com');
+        }
+      } catch (e) {
+      }
+
+      if (!hasRealUser) {
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              backgroundColor: AppTheme.surface,
+              title: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: AppTheme.yellow),
+                  SizedBox(width: 10),
+                  Text("Acción denegada", style: TextStyle(color: AppTheme.textPrimary)),
+                ],
+              ),
+              content: const Text(
+                "Debe dar de alta al menos un usuario con contraseña antes de cerrar sesión para no perder el acceso al sistema.",
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent),
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Entendido", style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+      return;
+    }
+
+    bool isException = s == Screen.upload || s == Screen.backup || s == Screen.logout;
+
+    if (_isNavigating && !isException) return;
+
+    setState(() => _current = s);
+
+    if (!isException) {
+      setState(() => _isNavigating = true);
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _isNavigating = false);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Row(
         children: [
-          _Sidebar(current: _current, onSelect: (s) {
-            if (s == Screen.logout) {
-              Navigator.pushReplacementNamed(context, '/login');
-            } else {
-              setState(() => _current = s);
-            }
-          }),
+          _Sidebar(
+            current: _current, 
+            onSelect: _handleNavigation,
+            isNavigating: _isNavigating,
+            userName: _userName,
+            showAlert: _showAlert,
+          ),
           Expanded(child: _buildScreen()),
         ],
       ),
@@ -120,8 +249,17 @@ class _MainShellState extends State<MainShell> {
 class _Sidebar extends StatelessWidget {
   final Screen current;
   final void Function(Screen) onSelect;
+  final bool isNavigating;
+  final String userName;
+  final bool showAlert;
 
-  const _Sidebar({required this.current, required this.onSelect});
+  const _Sidebar({
+    required this.current, 
+    required this.onSelect,
+    required this.isNavigating,
+    required this.userName,
+    required this.showAlert,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -139,7 +277,6 @@ class _Sidebar extends StatelessWidget {
       (Screen.logout, Icons.logout_rounded, 'Cerrar Sesión'),      
     ];
 
-    // SOLUCIÓN DE OVERFLOW: LayoutBuilder asegura que el menú sea scrolleable si la pantalla es pequeña.
     return Container(
       width: 220,
       color: AppTheme.surface,
@@ -154,7 +291,7 @@ class _Sidebar extends StatelessWidget {
                   children: [
                     const SizedBox(height: 32),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
                         children: [
                           Container(
@@ -168,20 +305,24 @@ class _Sidebar extends StatelessWidget {
                             ),
                             child: const Icon(Icons.school_rounded, color: Colors.white, size: 20),
                           ),
-                          const SizedBox(width: 12),
-                          const Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('TutorAssign', style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 15,
-                              )),
-                              Text('v2.0 Admin', style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 11,
-                              )),
-                            ],
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Sistema de asignación\nde tutorados', style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                  height: 1.2,
+                                )),
+                                const SizedBox(height: 2),
+                                Text(userName, style: const TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 11,
+                                ), overflow: TextOverflow.ellipsis, maxLines: 1),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -199,43 +340,54 @@ class _Sidebar extends StatelessWidget {
                     const SizedBox(height: 8),
                     ...items.map((item) {
                       final isActive = current == item.$1;
+                      final isException = item.$1 == Screen.upload || item.$1 == Screen.backup || item.$1 == Screen.logout;
+                      final isDisabled = isNavigating && !isException;
+                      
                       return _SidebarItem(
                         icon: item.$2,
                         label: item.$3,
                         isActive: isActive,
-                        onTap: () => onSelect(item.$1),
+                        isDisabled: isDisabled,
+                        onTap: isDisabled ? () {} : () => onSelect(item.$1),
                       );
                     }),
                     const Spacer(),
-                    Container(
-                      margin: const EdgeInsets.all(16),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accent.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.2)),
+                    if (showAlert) ...[
+                      GestureDetector(
+                        onTap: () => onSelect(Screen.logs),
+                        child: Container(
+                          margin: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: AppTheme.accent.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppTheme.accent.withValues(alpha: 0.2)),
+                          ),
+                          child: const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                Icon(Icons.warning_amber_rounded, color: AppTheme.yellow, size: 16),
+                                SizedBox(width: 8),
+                                Text('Alerta', style: TextStyle(
+                                  color: AppTheme.yellow,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                )),
+                              ]),
+                              SizedBox(height: 6),
+                              Text('Se requieren atención manual a los grupos\nVer en Registro', style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 11,
+                              )),
+                            ],
+                          ),
+                        ),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Row(children: [
-                            Icon(Icons.warning_amber_rounded, color: AppTheme.yellow, size: 16),
-                            SizedBox(width: 8),
-                            Text('Alerta', style: TextStyle(
-                              color: AppTheme.yellow,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                            )),
-                          ]),
-                          const SizedBox(height: 6),
-                          const Text('1 grupo requiere atención manual', style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 11,
-                          )),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
+                      const SizedBox(height: 16),
+                    ] else ...[
+                      const SizedBox(height: 16),
+                    ]
                   ],
                 ),
               ),
@@ -251,12 +403,14 @@ class _SidebarItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool isActive;
+  final bool isDisabled;
   final VoidCallback onTap;
 
   const _SidebarItem({
     required this.icon,
     required this.label,
     required this.isActive,
+    required this.isDisabled,
     required this.onTap,
   });
 
@@ -276,11 +430,15 @@ class _SidebarItem extends StatelessWidget {
         child: Row(
           children: [
             Icon(icon, size: 18,
-              color: isActive ? AppTheme.accentLight : AppTheme.textSecondary,
+              color: isDisabled 
+                  ? AppTheme.textSecondary.withOpacity(0.3) 
+                  : (isActive ? AppTheme.accentLight : AppTheme.textSecondary),
             ),
             const SizedBox(width: 12),
             Text(label, style: TextStyle(
-              color: isActive ? AppTheme.accentLight : AppTheme.textSecondary,
+              color: isDisabled 
+                  ? AppTheme.textSecondary.withOpacity(0.3) 
+                  : (isActive ? AppTheme.accentLight : AppTheme.textSecondary),
               fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
               fontSize: 13,
             )),

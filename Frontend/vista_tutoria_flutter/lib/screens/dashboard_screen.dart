@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../widgets/screen_wrapper.dart';
 
 class DashboardScreen extends StatefulWidget {
-  final List<Tutor> tutors;
+  final List<Tutor> tutors; 
   const DashboardScreen({super.key, required this.tutors});
 
   @override
@@ -14,10 +16,82 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   String _filterCareer = 'Todas';
   bool _warningShown = false;
+  bool _isLoading = true;
+  List<Tutor> _realTutors = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDashboardData();
+  }
+
+  Future<void> _fetchDashboardData() async {
+    setState(() => _isLoading = true);
+    try {
+      final response = await http.get(Uri.parse('http://127.0.0.1:8000/api/asignaciones/dashboard'), headers: {'Accept': 'application/json'});
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final List<dynamic> tutorsJson = data['tutores'] ?? [];
+        
+        List<Tutor> loadedTutors = [];
+        for (var t in tutorsJson) {
+          List<Student> tutorStudents = [];
+          if (t['grupos'] != null) {
+            for (var grupo in t['grupos']) {
+              if (grupo['tutorados'] != null) {
+                for (var stud in grupo['tutorados']) {
+                  var pivot = stud['pivot'] ?? {};
+                  if (pivot['estado_tutorado'] == 'activo' || stud['is_active'] == 1 || stud['is_active'] == true) {
+                    MobilityFlag flag = MobilityFlag.noChange;
+                    if (pivot['movilidad'] == 'cambiar') flag = MobilityFlag.canChange;
+                    if (pivot['movilidad'] == 'nuevo_ingreso') flag = MobilityFlag.newStudent;
+                    
+                    tutorStudents.add(Student(
+                      id: stud['id'].toString(),
+                      name: stud['nombre'],
+                      accountNumber: stud['numero_cuenta'].toString(),
+                      entryPeriod: stud['periodo_ingreso'] ?? '',
+                      career: stud['licenciatura'] != null ? stud['licenciatura']['abreviatura'] : '',
+                      isReentry: flag != MobilityFlag.newStudent,
+                      mobility: flag,
+                      tutorId: t['id'].toString(),
+                      isActive: true,
+                    ));
+                  }
+                }
+              }
+            }
+          }
+          loadedTutors.add(Tutor(
+            id: t['id'].toString(),
+            name: '${t['nombre']} ${t['apellido_paterno']}',
+            department: 'Ingeniería',
+            careers: t['licenciaturas'] != null ? (t['licenciaturas'] as List).map((l) => l['abreviatura'].toString()).toList() : [],
+            students: tutorStudents,
+            isActive: t['estado'] == 'Activo',
+          ));
+        }
+        setState(() {
+          _realTutors = loadedTutors;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final bool isFirstLogin = ModalRoute.of(context)?.settings.arguments as bool? ?? false;
+    // Aquí es donde cambia cómo extrae el isFirstLogin
+    final args = ModalRoute.of(context)?.settings.arguments;
+    bool isFirstLogin = false;
+    
+    if (args is Map<String, dynamic>) {
+      isFirstLogin = args['first_login'] ?? false;
+    } else if (args is bool) {
+      isFirstLogin = args;
+    }
 
     if (isFirstLogin && !_warningShown) {
       _warningShown = true;
@@ -26,16 +100,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
       });
     }
 
-    final critical = widget.tutors.where((t) => t.status == BalanceStatus.critical).length;
-    final balanced = widget.tutors.where((t) => t.status == BalanceStatus.balanced).length;
+    if (_isLoading) {
+      return const ScreenWrapper(
+        title: 'Dashboard de Supervisión',
+        subtitle: 'Cargando datos en tiempo real...',
+        child: Center(child: CircularProgressIndicator(color: AppTheme.accent)),
+      );
+    }
+    
+    int totalAlumnos = 0;
+    int reasignados = 0;
+    int bloqueados = 0;
+    int nuevos = 0;
+
+    for (var t in _realTutors) {
+      totalAlumnos += t.count;
+      reasignados += t.students.where((s) => s.mobility == MobilityFlag.canChange).length;
+      bloqueados += t.students.where((s) => s.mobility == MobilityFlag.noChange).length;
+      nuevos += t.students.where((s) => s.mobility == MobilityFlag.newStudent).length;
+    }
+
+    int average = _realTutors.isNotEmpty ? (totalAlumnos / _realTutors.length).round() : 30;
+    int minBalanced = average - 3;
+    int maxBalanced = average + 3;
+    int minWarning = average - 5;
+    int maxWarning = average + 5;
+
+    final critical = _realTutors.where((t) => t.count < minWarning || t.count > maxWarning).length;
+    final balanced = _realTutors.where((t) => t.count >= minBalanced && t.count <= maxBalanced).length;
 
     final Set<String> allCareers = {};
-    for (var t in widget.tutors) {
+    for (var t in _realTutors) {
       allCareers.addAll(t.careers);
     }
     final filterOptions = ['Todas', ...allCareers.toList()..sort()];
 
-    final filteredTutors = widget.tutors.where((t) {
+    final filteredTutors = _realTutors.where((t) {
       if (_filterCareer == 'Todas') return true;
       return t.careers.contains(_filterCareer);
     }).toList();
@@ -47,39 +147,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
         Row(children: [
-          const Expanded(child: _MetricCard('155', 'Alumnos Asignados', Icons.people_rounded, AppTheme.accent, '+58 nuevos')),
+          Expanded(child: _MetricCard('$totalAlumnos', 'Alumnos Asignados', Icons.people_rounded, AppTheme.accent, '+$nuevos nuevos')),
           const SizedBox(width: 16),
-          const Expanded(child: _MetricCard('12', 'Movimientos', Icons.swap_horiz_rounded, AppTheme.yellow, 'Reasignados automáticamente')),
+          Expanded(child: _MetricCard('$reasignados', 'Movimientos', Icons.swap_horiz_rounded, AppTheme.yellow, 'Reasignados automáticamente')),
           const SizedBox(width: 16),
-          const Expanded(child: _MetricCard('5', 'Bloqueados', Icons.lock_rounded, AppTheme.red, '"No Cambiar" sin mover')),
+          Expanded(child: _MetricCard('$bloqueados', 'Bloqueados', Icons.lock_rounded, AppTheme.red, '"No Cambiar" sin mover')),
           const SizedBox(width: 16),
-          Expanded(child: _MetricCard('$balanced / ${widget.tutors.length}', 'Grupos Balanceados', Icons.balance_rounded, AppTheme.green, 'Meta: 29-31 alumnos')),
+          Expanded(child: _MetricCard('$balanced / ${_realTutors.length}', 'Grupos Balanceados', Icons.balance_rounded, AppTheme.green, 'Meta: $minBalanced-$maxBalanced alumnos')),
         ]),
 
         const SizedBox(height: 24),
 
-        if (critical > 0) Container(
+        if (critical > 0) ...[
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.red.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.red.withValues(alpha: 0.4)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.error_rounded, color: AppTheme.red),
+              const SizedBox(width: 14),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('$critical grupos requieren atención manual', style: const TextStyle(
+                    color: AppTheme.red, fontWeight: FontWeight.w700, fontSize: 14,
+                  )),
+                  const Text('Hay grupos con desbalance crítico. Los alumnos marcados como "No Cambiar" pueden estar bloqueando el algoritmo.', style: TextStyle(
+                    color: AppTheme.textSecondary, fontSize: 12,
+                  )),
+                ],
+              )),
+            ]),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: AppTheme.red.withValues(alpha: 0.1),
+            color: AppTheme.surface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.red.withValues(alpha: 0.4)),
+            border: Border.all(color: AppTheme.border),
           ),
-          child: const Row(children: [
-            Icon(Icons.error_rounded, color: AppTheme.red),
-            SizedBox(width: 14),
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Requiere atención manual', style: TextStyle(
-                  color: AppTheme.red, fontWeight: FontWeight.w700, fontSize: 14,
-                )),
-                Text('Hay grupos con desbalance crítico. Los alumnos marcados como "No Cambiar" pueden estar bloqueando el algoritmo.', style: TextStyle(
-                  color: AppTheme.textSecondary, fontSize: 12,
-                )),
-              ],
-            )),
-          ]),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('Semáforo: ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+              const SizedBox(width: 12),
+              _LegendDot(AppTheme.green, '$minBalanced–$maxBalanced Equilibrado'),
+              const SizedBox(width: 20),
+              _LegendDot(AppTheme.yellow, '$minWarning–$maxWarning Leve desvío'),
+              const SizedBox(width: 20),
+              _LegendDot(AppTheme.red, '<$minWarning o >$maxWarning Crítico'),
+            ],
+          ),
         ),
 
         const SizedBox(height: 28),
@@ -126,31 +250,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             mainAxisSpacing: 12,
           ),
           itemCount: filteredTutors.length,
-          itemBuilder: (_, i) => _CompactTutorCard(tutor: filteredTutors[i]),
-        ),
-
-        const SizedBox(height: 24),
-
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppTheme.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.border),
-          ),
-          child: const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('Semáforo: ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-              SizedBox(width: 12),
-              _LegendDot(AppTheme.green, '29–31 Equilibrado'),
-              SizedBox(width: 20),
-              _LegendDot(AppTheme.yellow, '25–35 Leve desvío'),
-              SizedBox(width: 20),
-              _LegendDot(AppTheme.red, '<20 o >40 Crítico'),
-            ],
+          itemBuilder: (_, i) => _CompactTutorCard(
+            tutor: filteredTutors[i],
+            average: average,
           ),
         ),
+
       ]),
     );
   }
@@ -186,12 +291,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
 class _CompactTutorCard extends StatelessWidget {
   final Tutor tutor;
-  const _CompactTutorCard({required this.tutor});
+  final int average;
+  
+  const _CompactTutorCard({required this.tutor, required this.average});
+
+  BalanceStatus _getDynamicStatus() {
+    if (tutor.count >= average - 3 && tutor.count <= average + 3) return BalanceStatus.balanced;
+    if (tutor.count >= average - 5 && tutor.count <= average + 5) return BalanceStatus.warning;
+    return BalanceStatus.critical;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final color = AppTheme.statusColor(tutor.status);
-    final pct = (tutor.count / 40).clamp(0.0, 1.0);
+    final color = AppTheme.statusColor(_getDynamicStatus());
+    final pct = (tutor.count / (average + 10)).clamp(0.0, 1.0); 
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -293,75 +406,6 @@ class _MetricCard extends StatelessWidget {
           )),
         ],
       ),
-    );
-  }
-}
-
-class _TutorCard extends StatelessWidget {
-  final Tutor tutor;
-  const _TutorCard({required this.tutor});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = AppTheme.statusColor(tutor.status);
-    final pct = (tutor.count / 40).clamp(0.0, 1.0);
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
-      ),
-      child: Row(children: [
-        Container(
-          width: 42, height: 42,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.15),
-            shape: BoxShape.circle,
-          ),
-          child: Center(child: Text(
-            tutor.name.split(' ').last[0],
-            style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 16),
-          )),
-        ),
-        const SizedBox(width: 14),
-        Expanded(child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(tutor.name, style: const TextStyle(
-              color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 13,
-            ), maxLines: 1, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 4),
-            Text(tutor.careers.join(' · '), style: const TextStyle(
-              color: AppTheme.textSecondary, fontSize: 11,
-            )),
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: pct,
-                backgroundColor: color.withValues(alpha: 0.15),
-                valueColor: AlwaysStoppedAnimation<Color>(color),
-                minHeight: 5,
-              ),
-            ),
-          ],
-        )),
-        const SizedBox(width: 14),
-        Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('${tutor.count}', style: TextStyle(
-              color: color, fontSize: 24, fontWeight: FontWeight.w800,
-            )),
-            const Text('alumnos', style: TextStyle(
-              color: AppTheme.textSecondary, fontSize: 10,
-            )),
-          ],
-        ),
-      ]),
     );
   }
 }

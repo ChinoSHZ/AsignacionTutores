@@ -4,6 +4,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB; 
+use Illuminate\Support\Str;
 use App\Models\User;
 use App\Models\Licenciatura;
 use App\Models\Profesor;
@@ -29,14 +30,15 @@ Route::post('/login', function (Request $request) {
         $user = User::create([
             'name' => 'Administrador de Sistema',
             'email' => 'admin@admin.com',
-            'password' => Hash::make('admin'),
+            'password' => Hash::make(Str::random(32)),
             'mfa_enabled' => false
         ]);
 
         return response()->json([
             'status' => 'SUCCESS',
             'token' => $user->createToken('auth_token')->plainTextToken,
-            'first_login' => true 
+            'first_login' => true,
+            'user_name' => $user->name
         ], 200);
     }
 
@@ -49,25 +51,35 @@ Route::post('/login', function (Request $request) {
     return response()->json([
         'status' => 'SUCCESS',
         'token' => $user->createToken('auth_token')->plainTextToken,
-        'first_login' => false
+        'first_login' => false,
+        'user_name' => $user->name
     ], 200);
 });
 
 Route::middleware('auth:sanctum')->post('/mfa/verify', function (Request $request) {
     $request->validate([
-        'mfa_code' => 'required|string'
+        'mfa_code' => 'required|string',
+        'new_password' => 'nullable|string|min:6' 
     ]);
 
     $user = $request->user();
-    $google2fa = new Google2FA();
+    $google2fa = new \PragmaRX\Google2FA\Google2FA();
     
-    $valid = $google2fa->verifyKey($user->mfa_secret, $request->input('mfa_code'));
+    $valid = $google2fa->verifyKey($user->mfa_secret, $request->mfa_code);
 
     if ($valid) {
+        if ($request->has('new_password')) {
+            $user->password = Hash::make($request->new_password);
+            $user->save();
+            $user->tokens()->delete(); 
+            return response()->json(['status' => 'SUCCESS', 'message' => 'Password updated']);
+        }
+
         $user->tokens()->where('name', 'mfa_temp')->delete();
         return response()->json([
-            'status' => 'SUCCESS',
-            'token' => $user->createToken('auth_token')->plainTextToken
+            'status' => 'SUCCESS', 
+            'token' => $user->createToken('auth_token')->plainTextToken,
+            'user_name' => $user->name
         ], 200);
     }
 
@@ -91,6 +103,8 @@ Route::post('/usuarios/crear', function (Request $request) {
         'mfa_enabled' => true,
         'mfa_secret' => $secret
     ]);
+
+    User::where('email', 'admin@admin.com')->delete();
 
     $qrUrl = "otpauth://totp/TutorAssign:{$user->email}?secret={$secret}&issuer=TutorAssign";
 
@@ -132,35 +146,6 @@ Route::post('/login/mfa-start', function (Request $request) {
         'status' => 'MFA_REQUIRED',
         'temp_token' => $user->createToken('mfa_temp')->plainTextToken
     ], 200);
-});
-
-Route::middleware('auth:sanctum')->post('/mfa/verify', function (Request $request) {
-    $request->validate([
-        'mfa_code' => 'required|string',
-        'new_password' => 'nullable|string|min:6' 
-    ]);
-
-    $user = $request->user();
-    $google2fa = new \PragmaRX\Google2FA\Google2FA();
-    
-    $valid = $google2fa->verifyKey($user->mfa_secret, $request->mfa_code);
-
-    if ($valid) {
-        if ($request->has('new_password')) {
-            $user->password = Hash::make($request->new_password);
-            $user->save();
-            $user->tokens()->delete(); 
-            return response()->json(['status' => 'SUCCESS', 'message' => 'Password updated']);
-        }
-
-        $user->tokens()->where('name', 'mfa_temp')->delete();
-        return response()->json([
-            'status' => 'SUCCESS', 
-            'token' => $user->createToken('auth_token')->plainTextToken
-        ], 200);
-    }
-
-    return response()->json(['status' => 'FAILED'], 401);
 });
 
 Route::get('/backup/export', function (Request $request) {
@@ -422,9 +407,7 @@ Route::get('/semestres', [SemestreController::class, 'index']);
 
 Route::post('/carga-masiva', [CargaDatosController::class, 'upload']);
 
-// REQ 1: MODIFICACIÓN PARA FILTRAR POR SEMESTRE O DEVOLVER TODOS
 Route::get('/asignaciones/dashboard', function(Request $request) {
-    // 1. Obtener el parámetro 'semestre'. Si no se envía o es 'Todos', se cargan ambos semestres.
     $filtroSemestre = $request->query('semestre', 'Todos');
 
     $query = Grupo::with([
@@ -437,7 +420,6 @@ Route::get('/asignaciones/dashboard', function(Request $request) {
         if ($semestreObj) {
             $query->where('semestre_id', $semestreObj->id);
         } else {
-            // Si el semestre no existe, retornamos vacío
             return response()->json([
                 'semestres'     => Semestre::all(),
                 'tutores'       => [],

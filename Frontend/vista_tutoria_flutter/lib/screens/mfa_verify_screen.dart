@@ -15,7 +15,7 @@ class _MfaVerifyScreenState extends State<MfaVerifyScreen> {
   bool _isLoading = false;
   String _errorMessage = '';
   String? _tempToken;
-  String? _newPassword; // Para capturar la nueva contraseña en caso de actualización
+  String? _newPassword; 
 
   @override
   void didChangeDependencies() {
@@ -23,7 +23,7 @@ class _MfaVerifyScreenState extends State<MfaVerifyScreen> {
     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     if (args != null) {
       _tempToken = args['temp_token'];
-      _newPassword = args['new_password']; // Se recibe si el origen es 'password_update'
+      _newPassword = args['new_password']; 
     }
   }
 
@@ -48,7 +48,7 @@ class _MfaVerifyScreenState extends State<MfaVerifyScreen> {
         },
         body: jsonEncode({
           'mfa_code': _codeController.text,
-          if (_newPassword != null) 'new_password': _newPassword, // Envío condicional
+          if (_newPassword != null) 'new_password': _newPassword, 
         }),
       );
 
@@ -57,15 +57,22 @@ class _MfaVerifyScreenState extends State<MfaVerifyScreen> {
         if (data['status'] == 'SUCCESS') {
           if (!mounted) return;
 
-          // Si el servidor confirma actualización de contraseña, regresamos al login o usuarios
+          final String userName = data['user_name'] ?? 'Administrador';
+
           if (_newPassword != null) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Contraseña actualizada con éxito')),
             );
             Navigator.pushReplacementNamed(context, '/login');
           } else {
-            // Flujo normal de inicio de sesión
-            Navigator.pushReplacementNamed(context, '/home');
+            Navigator.pushReplacementNamed(
+              context, 
+              '/home',
+              arguments: {
+                'first_login': false,
+                'user_name': userName,
+              }
+            );
           }
         } else {
           setState(() => _errorMessage = 'Código incorrecto');

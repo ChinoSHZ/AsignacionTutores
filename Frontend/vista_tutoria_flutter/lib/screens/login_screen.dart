@@ -51,14 +51,16 @@ class _LoginScreenState extends State<LoginScreen> {
         } else if (data['status'] == 'SUCCESS') {
           if (!mounted) return;
           
-          // Se captura la bandera de primer inicio de sesión del backend
           final bool isFirstLogin = data['first_login'] ?? false;
+          final String userName = data['user_name'] ?? 'Administrador';
           
-          // Se navega a /home pasando la bandera como argumento
           Navigator.pushReplacementNamed(
             context, 
             '/home',
-            arguments: isFirstLogin,
+            arguments: {
+              'first_login': isFirstLogin,
+              'user_name': userName,
+            },
           );
         } else {
           setState(() => _errorMessage = 'Respuesta inesperada del servidor');
