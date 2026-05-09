@@ -13,6 +13,7 @@ class LicenciaturaSeeder extends Seeder
     public function run(): void
     {
         $carreras = [
+            ['codigo' => 'C00', 'abreviatura' => 'S/L', 'nombre' => 'Sin licenciatura'], // <-- LÍNEA NUEVA
             ['codigo' => 'C01', 'abreviatura' => 'ICO', 'nombre' => 'Licenciatura de Ingeniería en Computación'],
             ['codigo' => 'C02', 'abreviatura' => 'IME', 'nombre' => 'Licenciatura de Ingeniería Mecánica'],
             ['codigo' => 'C03', 'abreviatura' => 'ISES', 'nombre' => 'Licenciatura de Ingeniería en Sistemas Energéticos Sustentables'],

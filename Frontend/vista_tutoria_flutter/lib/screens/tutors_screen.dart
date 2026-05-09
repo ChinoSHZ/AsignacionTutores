@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:file_picker/file_picker.dart'; // <-- NUEVA IMPORTACIÓN
+import 'package:file_picker/file_picker.dart';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../widgets/screen_wrapper.dart';
@@ -164,7 +164,6 @@ class _TutorsScreenState extends State<TutorsScreen> {
     }
   }
 
-  // <-- NUEVO: Función para subir y procesar el archivo Excel -->
   Future<void> _uploadExcel() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -252,7 +251,7 @@ class _TutorsScreenState extends State<TutorsScreen> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: _apiCareers.map((c) {
+                      children: _apiCareers.where((c) => c.abbreviation != 'S/L').map((c) {
                         final abrev = c.abbreviation.trim();
                         final isSelected = selectedCareers.contains(abrev);
                         return FilterChip(
@@ -293,6 +292,11 @@ class _TutorsScreenState extends State<TutorsScreen> {
                 onPressed: () {
                   if (tutor != null && tutor.id.isEmpty) {
                     _mostrarSnackBar('Error crítico: La base de datos no está enviando el ID del tutor. Revisa el backend.', AppTheme.red);
+                    return;
+                  }
+
+                  if (nombreCtrl.text.trim().toLowerCase() == 'sin' && apPaternoCtrl.text.trim().toLowerCase() == 'tutor') {
+                    _mostrarSnackBar('El nombre "Sin tutor" está reservado para uso interno del sistema.', AppTheme.red);
                     return;
                   }
 
@@ -361,10 +365,14 @@ class _TutorsScreenState extends State<TutorsScreen> {
   Widget build(BuildContext context) {
     final Set<String> allCareers = {'Todas'};
     for (var c in _apiCareers) {
-      allCareers.add(c.abbreviation);
+      if (c.abbreviation != 'S/L') { 
+        allCareers.add(c.abbreviation);
+      }
     }
 
     final filteredTutors = _apiTutors.where((t) {
+      if (t.name == 'Sin tutor') return false;
+
       final matchSearch = _searchQuery.isEmpty || t.name.toLowerCase().contains(_searchQuery.toLowerCase()) || t.email.toLowerCase().contains(_searchQuery.toLowerCase());
       final matchCareer = _filterCareer == 'Todas' || t.careers.contains(_filterCareer);
       final matchStatus = _filterStatus == 'Todos' || (_filterStatus == 'Activos' ? t.isActive : !t.isActive);
@@ -412,7 +420,6 @@ class _TutorsScreenState extends State<TutorsScreen> {
               })),
               const Spacer(),
               
-              // <-- NUEVO: Botón "Añadir con Excel" -->
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3498DB), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16)),
                 icon: const Icon(Icons.upload_file_rounded, color: Colors.white),

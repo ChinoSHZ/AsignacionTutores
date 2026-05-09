@@ -1,29 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../widgets/screen_wrapper.dart';
 
 class UploadScreen extends StatefulWidget {
   const UploadScreen({super.key});
+
   @override
   State<UploadScreen> createState() => _UploadScreenState();
 }
 
 class _UploadScreenState extends State<UploadScreen> {
-  // Variables para almacenar los archivos físicos seleccionados
+  final TextEditingController _semestreCtrl = TextEditingController();
   PlatformFile? _fileNuevos;
   PlatformFile? _fileHistorico;
   PlatformFile? _filePropuesta;
-  
-  bool _isUploading = false;
+  bool _isLoading = false;
 
-  // ── NUEVO: Controlador para el semestre ──
-  final TextEditingController _semestreCtrl = TextEditingController();
-
-  // Función para abrir el selector de archivos
-  Future<void> _pickFile(int fileType) async {
+  Future<void> _pickFile(int type) async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'xls', 'csv'],
@@ -31,155 +27,132 @@ class _UploadScreenState extends State<UploadScreen> {
 
     if (result != null) {
       setState(() {
-        if (fileType == 1) _fileNuevos = result.files.first;
-        if (fileType == 2) _fileHistorico = result.files.first;
-        if (fileType == 3) _filePropuesta = result.files.first;
+        if (type == 1) _fileNuevos = result.files.first;
+        if (type == 2) _fileHistorico = result.files.first;
+        if (type == 3) _filePropuesta = result.files.first;
       });
     }
   }
 
-  // Función HTTP para enviar los archivos a Laravel
   Future<void> _uploadData() async {
-    // 1. Validación: Asegurarnos de que los 3 archivos estén seleccionados
-    if (_fileNuevos == null || _fileHistorico == null || _filePropuesta == null) {
-      _showSnackBar('Por favor selecciona los 3 archivos antes de procesar.', AppTheme.yellow);
+    if (_semestreCtrl.text.isEmpty || _fileNuevos == null || _fileHistorico == null || _filePropuesta == null) {
+      _mostrarSnackBar('Debe ingresar la clave del semestre y seleccionar los 3 archivos obligatorios', AppTheme.yellow);
       return;
     }
 
-    // ── NUEVO: Validación de semestre ──
-    if (_semestreCtrl.text.trim().isEmpty) {
-      _showSnackBar('Por favor ingresa la clave del semestre (Ej: 2024A).', AppTheme.yellow);
-      return;
-    }
-
-    setState(() => _isUploading = true);
+    setState(() => _isLoading = true);
 
     try {
-      // 2. Preparar la petición Multipart
       var request = http.MultipartRequest(
-        'POST', 
-        Uri.parse('http://127.0.0.1:8000/api/carga-masiva')
+        'POST',
+        Uri.parse('http://127.0.0.1:8000/api/carga-masiva'),
       );
-      request.headers.addAll({'Accept': 'application/json'}); // Para ver el error exacto si falla
 
-      // ── NUEVO: Enviar la clave del semestre al backend ──
       request.fields['semestre_clave'] = _semestreCtrl.text.trim().toUpperCase();
 
-      // Helper para adjuntar archivos (soporta Web y Desktop/Mobile)
-      Future<void> addFileToRequest(String fieldName, PlatformFile file) async {
-        if (file.bytes != null) {
-          // Para Flutter Web
-          request.files.add(http.MultipartFile.fromBytes(fieldName, file.bytes!, filename: file.name));
-        } else if (file.path != null) {
-          // Para Desktop/Mobile
-          request.files.add(await http.MultipartFile.fromPath(fieldName, file.path!));
-        }
-      }
+      await _appendFileToRequest(request, 'file_nuevos', _fileNuevos!);
+      await _appendFileToRequest(request, 'file_historico', _fileHistorico!);
+      await _appendFileToRequest(request, 'file_propuesta', _filePropuesta!);
 
-      // 3. Adjuntar los archivos con los nombres que espera el controlador de Laravel
-      await addFileToRequest('file_nuevos', _fileNuevos!);
-      await addFileToRequest('file_historico', _fileHistorico!);
-      await addFileToRequest('file_propuesta', _filePropuesta!);
-
-      // 4. Enviar y esperar respuesta
       var streamedResponse = await request.send();
       var response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode == 200) {
-        _showSnackBar('Carga exitosa. La base de datos ha sido actualizada.', AppTheme.green);
-        // Opcional: Limpiar los archivos después del éxito
+        _mostrarSnackBar('Procesamiento masivo completado con éxito', AppTheme.green);
         setState(() {
+          _semestreCtrl.clear();
           _fileNuevos = null;
           _fileHistorico = null;
           _filePropuesta = null;
-          _semestreCtrl.clear();
         });
       } else {
-        var body = jsonDecode(response.body);
-        String errorMsg = body['error'] ?? body['message'] ?? 'Error desconocido del servidor';
-        _showSnackBar('Falló: $errorMsg', AppTheme.red);
+        _mostrarSnackBar('Error en el procesamiento de datos. Revisa los logs en backend.', AppTheme.red);
       }
     } catch (e) {
-      _showSnackBar('Error de conexión con el servidor: $e', AppTheme.red);
+      _mostrarSnackBar('Error de conexión con el servidor', AppTheme.red);
     } finally {
-      setState(() => _isUploading = false);
+      setState(() => _isLoading = false);
     }
   }
 
-  void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message, style: const TextStyle(color: Colors.white, fontFamily: 'monospace')),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-      )
-    );
+  Future<void> _appendFileToRequest(http.MultipartRequest request, String field, PlatformFile file) async {
+    if (file.bytes != null) {
+      request.files.add(http.MultipartFile.fromBytes(field, file.bytes!, filename: file.name));
+    } else if (file.path != null) {
+      request.files.add(await http.MultipartFile.fromPath(field, file.path!));
+    }
   }
 
-  @override
-  void dispose() {
-    _semestreCtrl.dispose();
-    super.dispose();
+  Future<void> _downloadTemplate(String fileName) async {
+    final url = Uri.parse('http://127.0.0.1:8000/templates/$fileName');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else {
+      _mostrarSnackBar('No se pudo iniciar la descarga de $fileName', AppTheme.red);
+    }
+  }
+
+  void _mostrarSnackBar(String msg, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg, style: const TextStyle(color: Colors.white)), backgroundColor: color));
   }
 
   @override
   Widget build(BuildContext context) {
     return ScreenWrapper(
       title: 'Carga de Datos',
-      subtitle: 'Importar archivos Excel para actualizar la base de datos',
+      subtitle: 'Sincronización masiva de asignaciones académicas mediante archivos Excel',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch, // Para que el botón ocupe el ancho
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _FileDropZone(
-                label: 'Nuevos Ingresos',
-                subtitle: _fileNuevos?.name ?? 'Seleccionar CSV/Excel',
-                icon: Icons.person_add_rounded,
-                color: AppTheme.green,
-                isLoaded: _fileNuevos != null,
-                onLoad: () => _pickFile(1),
-              )),
-              const SizedBox(width: 16),
-              Expanded(child: _FileDropZone(
-                label: 'Registro Histórico',
-                subtitle: _fileHistorico?.name ?? 'Seleccionar CSV/Excel',
-                icon: Icons.history_edu_rounded,
-                color: const Color(0xFF3498DB),
-                isLoaded: _fileHistorico != null,
-                onLoad: () => _pickFile(2),
-              )),
-              const SizedBox(width: 16),
-              Expanded(child: _FileDropZone(
-                label: 'Propuesta Semestre',
-                subtitle: _filePropuesta?.name ?? 'Seleccionar CSV/Excel',
-                icon: Icons.swap_horiz_rounded,
-                color: AppTheme.yellow,
-                isLoaded: _filePropuesta != null,
-                onLoad: () => _pickFile(3),
-              )),
-            ],
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.accent.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.accent.withOpacity(0.3)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline_rounded, color: AppTheme.accentLight),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Instrucciones de Carga', style: TextStyle(color: AppTheme.accentLight, fontWeight: FontWeight.bold, fontSize: 16)),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '1. Ingresa la clave del semestre objetivo (Ej. 2024A o 2024B).\n'
+                        '2. Selecciona los tres archivos requeridos en formato Excel o CSV.\n'
+                        '3. El sistema integrará a los nuevos ingresos, respetará a los reingresos y ajustará grupos según la propuesta.\n'
+                        '4. El algoritmo balanceará automáticamente la carga restante entre tutores activos.',
+                        style: TextStyle(color: AppTheme.textPrimary, height: 1.5),
+                      ),
+                    ],
+                  ),
+                )
+              ],
+            ),
           ),
-          
           const SizedBox(height: 32),
 
-          // ── NUEVO: CAMPO DE SEMESTRE ──
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              const Text('Semestre Objetivo:', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 16),
               SizedBox(
-                width: 300,
+                width: 200,
                 child: TextField(
                   controller: _semestreCtrl,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+                  style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.5),
                   decoration: InputDecoration(
-                    labelText: 'Clave del Semestre (Ej. 2024A)',
+                    hintText: 'Ej. 2024A',
+                    hintStyle: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.normal, letterSpacing: 0),
                     filled: true,
                     fillColor: AppTheme.surfaceLight,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                    prefixIcon: const Icon(Icons.date_range_rounded, color: AppTheme.accent),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   ),
                 ),
               ),
@@ -187,95 +160,219 @@ class _UploadScreenState extends State<UploadScreen> {
           ),
           const SizedBox(height: 24),
 
-          // Botón de Envío
-          _isUploading 
-            ? const Center(child: CircularProgressIndicator(color: AppTheme.accent))
-            : ElevatedButton.icon(
-                onPressed: _uploadData,
-                icon: const Icon(Icons.cloud_upload_rounded, color: Colors.white),
-                label: const Text('PROCESAR ARCHIVOS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.accent,
-                  padding: const EdgeInsets.symmetric(vertical: 20),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          Row(
+            children: [
+              Expanded(
+                child: _UploadCard(
+                  title: 'Alumnos de Nuevo Ingreso',
+                  description: 'Alumnos que ingresan por primera vez al sistema.',
+                  file: _fileNuevos,
+                  onSelect: () => _pickFile(1),
+                  icon: Icons.person_add_alt_1_rounded,
+                  color: const Color(0xFF3498DB),
                 ),
               ),
-
+              const SizedBox(width: 16),
+              Expanded(
+                child: _UploadCard(
+                  title: 'Registro Histórico',
+                  description: 'Base de datos del semestre anterior para reingresos.',
+                  file: _fileHistorico,
+                  onSelect: () => _pickFile(2),
+                  icon: Icons.history_rounded,
+                  color: AppTheme.accent,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _UploadCard(
+                  title: 'Propuesta de Semestre',
+                  description: 'Movimientos forzados autorizados por la coordinación.',
+                  file: _filePropuesta,
+                  onSelect: () => _pickFile(3),
+                  icon: Icons.edit_document,
+                  color: AppTheme.yellow,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 32),
+
+          Align(
+            alignment: Alignment.centerRight,
+            child: _isLoading
+                ? const CircularProgressIndicator(color: AppTheme.accent)
+                : ElevatedButton.icon(
+                    onPressed: _uploadData,
+                    icon: const Icon(Icons.play_arrow_rounded, color: Colors.white),
+                    label: const Text('Iniciar Procesamiento', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.accent,
+                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+          ),
           
-          const Text('Reglas del sistema:', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
-          const SizedBox(height: 14),
-          Wrap(spacing: 10, runSpacing: 10, children: [
-            const _RuleChip(Icons.priority_high_rounded, 'Prioridad 1: Nuevos Ingresos', AppTheme.green),
-            const _RuleChip(Icons.history_rounded, 'Prioridad 2: Histórico', Color(0xFF3498DB)),
-            const _RuleChip(Icons.edit_document, 'Prioridad 3: Sobreescrituras', AppTheme.yellow),
-          ]),
+          const SizedBox(height: 40),
+          const Divider(color: AppTheme.border),
+          const SizedBox(height: 24),
+          const Text('Plantillas de Formato', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          const Text('Descarga los archivos base para la estructuración y registro de información antes de la carga.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              _TemplateButton(title: 'Catálogo de Profesores', fileName: 'CatalogoProfesores.xlsx', onTap: () => _downloadTemplate('CatalogoProfesores.xlsx')),
+              _TemplateButton(title: 'Registro Histórico', fileName: 'RegistroHistorico.xlsx', onTap: () => _downloadTemplate('RegistroHistorico.xlsx')),
+              _TemplateButton(title: 'Nuevo Ingreso', fileName: 'NuevoIngreso.xlsx', onTap: () => _downloadTemplate('NuevoIngreso.xlsx')),
+              _TemplateButton(title: 'Propuesta Semestre', fileName: 'PropuestaSemestre.xlsx', onTap: () => _downloadTemplate('PropuestaSemestre.xlsx')),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-// El _FileDropZone (simulado aquí para que coincida con tu diseño anterior)
-class _FileDropZone extends StatelessWidget {
-  final String label, subtitle;
+class _UploadCard extends StatelessWidget {
+  final String title;
+  final String description;
+  final PlatformFile? file;
+  final VoidCallback onSelect;
   final IconData icon;
   final Color color;
-  final bool isLoaded;
-  final VoidCallback onLoad;
 
-  const _FileDropZone({
-    required this.label, required this.subtitle, required this.icon,
-    required this.color, required this.isLoaded, required this.onLoad,
+  const _UploadCard({
+    required this.title,
+    required this.description,
+    required this.file,
+    required this.onSelect,
+    required this.icon,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onLoad,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: isLoaded ? color.withValues(alpha: 0.1) : AppTheme.surfaceLight,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isLoaded ? color : AppTheme.border, width: 2),
-        ),
-        child: Column(
-          children: [
-            Icon(isLoaded ? Icons.check_circle_rounded : icon, color: isLoaded ? color : AppTheme.textSecondary, size: 40),
-            const SizedBox(height: 12),
-            Text(label, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text(subtitle, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
-          ],
-        ),
+    final bool hasFile = file != null;
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: hasFile ? color.withOpacity(0.5) : AppTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: color, size: 28),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(title, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(description, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4)),
+          const SizedBox(height: 24),
+          
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.bg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: hasFile ? color.withOpacity(0.3) : AppTheme.border),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  hasFile ? Icons.check_circle_rounded : Icons.insert_drive_file_outlined,
+                  color: hasFile ? color : AppTheme.textSecondary,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    hasFile ? file!.name : 'Sin archivo',
+                    style: TextStyle(
+                      color: hasFile ? AppTheme.textPrimary : AppTheme.textSecondary,
+                      fontSize: 13,
+                      fontWeight: hasFile ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onSelect,
+              icon: Icon(hasFile ? Icons.edit_rounded : Icons.upload_file_rounded, size: 18),
+              label: Text(hasFile ? 'Cambiar Archivo' : 'Seleccionar', style: const TextStyle(fontWeight: FontWeight.bold)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: hasFile ? color : AppTheme.textPrimary,
+                side: BorderSide(color: hasFile ? color.withOpacity(0.5) : AppTheme.border),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _RuleChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  const _RuleChip(this.icon, this.label, this.color);
+class _TemplateButton extends StatelessWidget {
+  final String title;
+  final String fileName;
+  final VoidCallback onTap;
+
+  const _TemplateButton({required this.title, required this.fileName, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha:0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha:0.25)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 6),
-          Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
-        ],
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        width: 220,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(color: AppTheme.surfaceLight, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppTheme.border)),
+        child: Row(
+          children: [
+            const Icon(Icons.download_rounded, color: AppTheme.green, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 2),
+                  Text(fileName, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10), overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

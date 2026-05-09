@@ -240,8 +240,50 @@ Route::put('/licenciaturas/{id}', function (Illuminate\Http\Request $request, $i
 });
 
 Route::delete('/licenciaturas/{id}', function ($id) {
-    App\Models\Licenciatura::destroy($id);
-    return response()->json(['status' => 'SUCCESS']);
+    try {
+        \Illuminate\Support\Facades\DB::beginTransaction();
+
+        // 1. Asegurar que existe la licenciatura comodín
+        $sinLic = App\Models\Licenciatura::firstOrCreate(
+            ['abreviatura' => 'S/L'],
+            ['codigo' => 'C00', 'nombre' => 'Sin licenciatura']
+        );
+
+        // Protección: Evitar que alguien borre la licenciatura comodín por error
+        if ($id == $sinLic->id) {
+            return response()->json(['status' => 'FAILED', 'error' => 'No se puede eliminar la categoría de respaldo.'], 403);
+        }
+
+        // 2. Reasignar Alumnos (Tutorados) que tengan esta licenciatura
+        App\Models\Tutorado::where('licenciatura_id', $id)->update(['licenciatura_id' => $sinLic->id]);
+
+        // 3. Reasignar Profesores
+        // Buscamos a los profesores que tienen la licenciatura que se va a borrar
+        $profesores = App\Models\Profesor::whereHas('licenciaturas', function ($query) use ($id) {
+            $query->where('licenciaturas.id', $id);
+        })->get();
+
+        foreach ($profesores as $profesor) {
+            // Le quitamos la licenciatura que se va a eliminar
+            $profesor->licenciaturas()->detach($id);
+
+            // Verificamos si se quedó sin ninguna licenciatura en absoluto
+            if ($profesor->licenciaturas()->count() === 0) {
+                // Le asignamos la licenciatura comodín
+                $profesor->licenciaturas()->attach($sinLic->id);
+            }
+        }
+
+        // 4. Finalmente, procedemos a borrar la licenciatura original
+        App\Models\Licenciatura::destroy($id);
+
+        \Illuminate\Support\Facades\DB::commit();
+        return response()->json(['status' => 'SUCCESS']);
+        
+    } catch (\Exception $e) {
+        \Illuminate\Support\Facades\DB::rollBack();
+        return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
+    }
 });
 
 Route::get('/profesores', function () {
@@ -299,11 +341,43 @@ Route::put('/profesores/{id}', function (Illuminate\Http\Request $request, $id) 
 });
 
 Route::delete('/profesores/{id}', function ($id) {
-    $profesor = App\Models\Profesor::findOrFail($id);
-    $profesor->licenciaturas()->detach(); 
-    $profesor->delete();
-    
-    return response()->json(['status' => 'SUCCESS']);
+    try {
+        \Illuminate\Support\Facades\DB::beginTransaction();
+
+        $sinLic = App\Models\Licenciatura::firstOrCreate(
+            ['abreviatura' => 'S/L'],
+            ['codigo' => 'C00', 'nombre' => 'Sin licenciatura']
+        );
+
+        $sinTutor = App\Models\Profesor::where('correo', 'sintutor@uaemex.mx')->first();
+        if (!$sinTutor) {
+            $sinTutor = App\Models\Profesor::create([
+                'nombre' => 'Sin',
+                'apellido_paterno' => 'tutor',
+                'apellido_materno' => '',
+                'correo' => 'sintutor@uaemex.mx',
+                'estado' => 'Baja', 
+            ]);
+            $sinTutor->licenciaturas()->attach($sinLic->id);
+        }
+
+        if ($id == $sinTutor->id) {
+            return response()->json(['status' => 'FAILED', 'error' => 'No se puede eliminar el tutor de respaldo.'], 403);
+        }
+
+        App\Models\Grupo::where('tutor_id', $id)->update(['tutor_id' => $sinTutor->id]);
+
+        $profesor = App\Models\Profesor::findOrFail($id);
+        $profesor->licenciaturas()->detach();
+        $profesor->delete();
+
+        \Illuminate\Support\Facades\DB::commit();
+        return response()->json(['status' => 'SUCCESS']);
+        
+    } catch (\Exception $e) {
+        \Illuminate\Support\Facades\DB::rollBack();
+        return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
+    }
 });
 
 Route::post('/profesores/excel', function (Request $request) {

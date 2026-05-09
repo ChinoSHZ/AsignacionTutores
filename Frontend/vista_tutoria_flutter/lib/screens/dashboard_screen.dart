@@ -83,7 +83,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Aquí es donde cambia cómo extrae el isFirstLogin
     final args = ModalRoute.of(context)?.settings.arguments;
     bool isFirstLogin = false;
     
@@ -121,9 +120,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     int average = _realTutors.isNotEmpty ? (totalAlumnos / _realTutors.length).round() : 30;
-    int minBalanced = average - 3;
+    
+    // MODIFICACIÓN: Se asegura que el valor mínimo sea 1
+    int minBalanced = (average - 3).clamp(1, 999);
     int maxBalanced = average + 3;
-    int minWarning = average - 5;
+    int minWarning = (average - 5).clamp(1, 999);
     int maxWarning = average + 5;
 
     final critical = _realTutors.where((t) => t.count < minWarning || t.count > maxWarning).length;
@@ -296,8 +297,14 @@ class _CompactTutorCard extends StatelessWidget {
   const _CompactTutorCard({required this.tutor, required this.average});
 
   BalanceStatus _getDynamicStatus() {
-    if (tutor.count >= average - 3 && tutor.count <= average + 3) return BalanceStatus.balanced;
-    if (tutor.count >= average - 5 && tutor.count <= average + 5) return BalanceStatus.warning;
+    // MODIFICACIÓN: Se asegura que el valor mínimo sea 1 en la lógica de la tarjeta
+    int lowBalanced = (average - 3).clamp(1, 999);
+    int highBalanced = average + 3;
+    int lowWarning = (average - 5).clamp(1, 999);
+    int highWarning = average + 5;
+
+    if (tutor.count >= lowBalanced && tutor.count <= highBalanced) return BalanceStatus.balanced;
+    if (tutor.count >= lowWarning && tutor.count <= highWarning) return BalanceStatus.warning;
     return BalanceStatus.critical;
   }
 

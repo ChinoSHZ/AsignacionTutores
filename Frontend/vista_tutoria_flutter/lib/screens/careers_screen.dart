@@ -202,6 +202,8 @@ class _CareersScreenState extends State<CareersScreen> {
   @override
   Widget build(BuildContext context) {
     final filteredCareers = _apiCareers.where((c) {
+      if (c.abbreviation == 'S/L') return false;
+      
       return _searchQuery.isEmpty ||
           c.abbreviation.toLowerCase().contains(_searchQuery.toLowerCase()) ||
           c.name.toLowerCase().contains(_searchQuery.toLowerCase());

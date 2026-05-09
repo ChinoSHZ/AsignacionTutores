@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // <-- REQ 2: Necesario para el portapapeles
+import 'package:flutter/services.dart'; 
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../theme/app_theme.dart';
@@ -115,7 +115,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
         }).toList();
       }
 
-      // REQ 1: Enviar el semestre seleccionado al backend como filtro dinámico
       String url = 'http://127.0.0.1:8000/api/asignaciones/dashboard';
       if (_filterSemestre != 'Todos') {
         url += '?semestre=$_filterSemestre';
@@ -153,7 +152,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                 for (var stud in grupo['tutorados']) {
                   var pivot = stud['pivot'] ?? {};
                   var movilidadDB = pivot['movilidad'] ?? 'no_cambiar';
-                  var estadoTutoradoDB = pivot['estado_tutorado'] ?? 'activo'; // Req 3
+                  var estadoTutoradoDB = pivot['estado_tutorado'] ?? 'activo';
                   
                   MobilityFlag flag = MobilityFlag.noChange;
                   if (movilidadDB == 'cambiar') flag = MobilityFlag.canChange;
@@ -264,13 +263,12 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
           AppTheme.mobilityLabel(s.mobility) == _filterMobility;
       final matchTutor = _filterTutor == 'Todos' || s.tutorId == _filterTutor;
       
-      // REQ 1: Eliminado el filtrado local por Semestre
       return matchSearch && matchCareer && matchMobility && matchTutor;
     }).toList();
   }
 
   void _showReassignDialog(Student student) {
-    final available = _realTutors.where((t) => t.id != student.tutorId && t.isActive && t.students.where((st) => st.isActive).length < 35).toList();
+    final available = _realTutors.where((t) => t.id != student.tutorId && t.isActive && t.name != 'Sin tutor' && t.students.where((st) => st.isActive).length < 35).toList();
     showDialog(
       context: context,
       builder: (_) => _ReassignDialog(
@@ -340,12 +338,23 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
   }
 
   void _showCareerChangeDialog(Student student) {
+    String initialVal = student.career;
+    
+    // Si tiene S/L, seleccionamos la primera carrera válida disponible para evitar errores
+    if (initialVal == 'S/L') {
+      final validCareers = _apiCareers.where((c) => c.abbreviation != 'S/L');
+      if (validCareers.isNotEmpty) {
+        initialVal = validCareers.first.abbreviation;
+      }
+    }
+
     showDialog(
       context: context,
       builder: (_) => _QuickChangeDialog<String>(
         title: 'Cambiar Licenciatura',
-        currentValue: student.career,
-        options: _apiCareers.map((c) => c.abbreviation).toList(),
+        currentValue: initialVal,
+        // Ocultamos la opción 'S/L'
+        options: _apiCareers.where((c) => c.abbreviation != 'S/L').map((c) => c.abbreviation).toList(),
         labelBuilder: (val) => val,
         onSave: (newCareer) {
           _saveStudentToBackend(student.accountNumber, student.name, student.entryPeriod, newCareer, student.mobility, student.tutorId, student.isActive);
@@ -369,135 +378,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
     );
   }
 
-  // <-- REQ 2: Lógica para la ventana "Copiar Grupos" -->
-  void _showCopyGroupsDialog() {
-    String localSearchQuery = '';
-    
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) {
-          // Filtrar tutores basados en la búsqueda local
-          final filteredTutors = _realTutors.where((t) {
-            return localSearchQuery.isEmpty || t.name.toLowerCase().contains(localSearchQuery.toLowerCase());
-          }).toList();
-
-          return Dialog(
-            backgroundColor: AppTheme.surface,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Container(
-              width: 500,
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Copiar Grupos de Tutores', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 16),
-                  
-                  TextField(
-                    onChanged: (v) => setModalState(() => localSearchQuery = v),
-                    style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                    decoration: InputDecoration(
-                      hintText: 'Buscar profesor...',
-                      hintStyle: const TextStyle(color: AppTheme.textSecondary),
-                      prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary, size: 18),
-                      filled: true,
-                      fillColor: AppTheme.bg,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  SizedBox(
-                    height: 350,
-                    child: filteredTutors.isEmpty
-                        ? const Center(child: Text('No se encontraron profesores', style: TextStyle(color: AppTheme.textSecondary)))
-                        : ListView.separated(
-                            itemCount: filteredTutors.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 12),
-                            itemBuilder: (_, i) {
-                              final t = filteredTutors[i];
-                              // Solo tomar los alumnos activos de este tutor
-                              final activeStudents = t.students.where((st) => st.isActive).toList();
-                              
-                              // Construir el string de cuentas (req 2)
-                              String cuentasText = '';
-                              for (int j = 0; j < activeStudents.length; j++) {
-                                cuentasText += activeStudents[j].accountNumber;
-                                if (j < activeStudents.length - 1) {
-                                  cuentasText += ',\n';
-                                }
-                              }
-
-                              return Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.bg,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Expanded(child: Text(t.name, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 14))),
-                                        IconButton(
-                                          icon: const Icon(Icons.copy_rounded, color: AppTheme.accent, size: 18),
-                                          tooltip: 'Copiar al portapapeles',
-                                          onPressed: () {
-                                            Clipboard.setData(ClipboardData(text: cuentasText)).then((_) {
-                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copiado al portapapeles'), backgroundColor: AppTheme.green));
-                                            });
-                                          },
-                                        )
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Container(
-                                      width: double.infinity,
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.surfaceLight,
-                                        borderRadius: BorderRadius.circular(4),
-                                        border: Border.all(color: AppTheme.border),
-                                      ),
-                                      // TextField de solo lectura con scroll para las cuentas
-                                      child: ConstrainedBox(
-                                        constraints: const BoxConstraints(maxHeight: 100),
-                                        child: SingleChildScrollView(
-                                          child: Text(
-                                            cuentasText.isEmpty ? 'Sin alumnos asignados' : cuentasText,
-                                            style: const TextStyle(color: AppTheme.textSecondary, fontFamily: 'monospace', fontSize: 12),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                  const SizedBox(height: 16),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Cerrar', style: TextStyle(color: AppTheme.textSecondary)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final filtered = _filtered;
@@ -508,12 +388,16 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
     }
     final paginatedStudents = filtered.skip(_currentPage * _itemsPerPage).take(_itemsPerPage).toList();
 
-    final careerOptions = ['Todas', ..._apiCareers.map((c) => c.abbreviation)];
+    // Filtramos para que 'S/L' no aparezca en el combo de la tabla principal
+    final careerOptions = [
+      'Todas', 
+      ..._apiCareers.where((c) => c.abbreviation != 'S/L').map((c) => c.abbreviation)
+    ];
     final mobilities = ['Todas', 'Nuevo Ingreso', 'Sí Cambiar', 'No Cambiar'];
 
     final availableTutorsForFilter = _filterCareer == 'Todas'
-        ? _realTutors
-        : _realTutors.where((t) => t.careers.contains(_filterCareer)).toList();
+        ? _realTutors.where((t) => t.name != 'Sin tutor').toList()
+        : _realTutors.where((t) => t.careers.contains(_filterCareer) && t.name != 'Sin tutor').toList();
 
     final tutorOptions = [
       ('Todos', 'Todos'),
@@ -643,7 +527,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                             _filterSemestre = v ?? 'Todos';
                             _currentPage = 0;
                           });
-                          // REQ 1: Trigger de búsqueda remota al cambiar combo de semestre
                           _fetchAsignacionesRealTime();
                         },
                       ),
@@ -690,7 +573,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                         orElse: () => _realTutors.first);
                     final mobilityColor = AppTheme.mobilityColor(s.mobility);
                     final isLocked = s.mobility == MobilityFlag.noChange;
-
+                    final isSinTutor = tutor.name == 'Sin tutor';
                     final activeStudentsCount = tutor.students.where((st) => st.isActive).length;
 
                     return Container(
@@ -768,21 +651,26 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                                   children: [
                                     Row(
                                       children: [
-                                        if (!tutor.isActive)
+                                        if (isSinTutor)
+                                          const Padding(
+                                            padding: EdgeInsets.only(right: 6.0),
+                                            child: Icon(Icons.person_off_rounded, color: AppTheme.red, size: 16),
+                                          )
+                                        else if (!tutor.isActive)
                                           const Padding(
                                             padding: EdgeInsets.only(right: 6.0),
                                             child: Icon(Icons.warning_amber_rounded, color: AppTheme.red, size: 14),
                                           ),
                                         Expanded(
-                                          child: Text(tutor.name,
-                                              style: TextStyle(color: tutor.isActive ? AppTheme.textPrimary : AppTheme.red, fontSize: 12),
+                                          child: Text(isSinTutor ? 'Sin tutor asignado' : tutor.name,
+                                              style: TextStyle(color: (tutor.isActive && !isSinTutor) ? AppTheme.textPrimary : AppTheme.red, fontSize: 12),
                                               overflow: TextOverflow.ellipsis),
                                         ),
                                       ],
                                     ),
                                     Row(children: [
                                       Text('$activeStudentsCount alumnos • ',
-                                          style: TextStyle(color: AppTheme.statusColor(tutor.status), fontSize: 10)),
+                                          style: TextStyle(color: isSinTutor ? AppTheme.red : AppTheme.statusColor(tutor.status), fontSize: 10)),
                                       Text(tutor.isActive ? 'Activo' : 'Baja',
                                           style: TextStyle(
                                               color: tutor.isActive ? AppTheme.green : AppTheme.red,
@@ -919,8 +807,12 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                       Text(' = Cambiar  |  ',
                           style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                       Icon(Icons.warning_amber_rounded, color: AppTheme.red, size: 14),
-                      Text(' = Tutor dado de baja',
+                      Text(' = Tutor dado de baja  |  ',
                           style: TextStyle(color: AppTheme.red, fontSize: 12)),
+                      Icon(Icons.person_off_rounded, color: AppTheme.red, size: 14),
+                      Text(' = Sin tutor asignado  |  ', style: TextStyle(color: AppTheme.red, fontSize: 12)),
+                      Text('S/L', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 12)),
+                      Text(' = Sin licenciatura', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                     ],
                   ),
                 ),
@@ -953,7 +845,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               ]
             ],
           ),
-        ),
+        )
       ]),
     );
   }
@@ -1234,19 +1126,24 @@ class _StudentDialogState extends State<_StudentDialog> {
     _apMaternoCtrl = TextEditingController(text: nameParts.length > 2 ? nameParts.sublist(2).join(' ') : '');
 
     final careerExists = widget.careersCatalog.any((c) => c.abbreviation == s?.career);
-    _selectedCareer = (careerExists && s != null)
+    final validCareers = widget.careersCatalog.where((c) => c.abbreviation != 'S/L').toList();
+    
+    // Si el alumno tiene "S/L", se preselecciona la primera carrera válida para forzar el cambio.
+    _selectedCareer = (careerExists && s != null && s.career != 'S/L')
         ? s.career
-        : (widget.careersCatalog.isNotEmpty ? widget.careersCatalog.first.abbreviation : '');
+        : (validCareers.isNotEmpty ? validCareers.first.abbreviation : '');
 
     _selectedMobility = s?.mobility ?? MobilityFlag.newStudent;
     
-    final activeTutors = widget.tutors.where((t) => t.isActive).toList();
+    final activeTutors = widget.tutors.where((t) => t.isActive && t.name != 'Sin tutor').toList();
     
     _selectedTutorId = s?.tutorId ?? (activeTutors.isNotEmpty ? activeTutors.first.id : '');
     
     if (s?.tutorId != null && !activeTutors.any((t) => t.id == s?.tutorId)) {
         final assignedTutor = widget.tutors.firstWhere((t) => t.id == s?.tutorId, orElse: () => Tutor(id: s!.tutorId, name: 'Desconocido', department: '', careers: []));
-        activeTutors.add(assignedTutor);
+        if (assignedTutor.name != 'Sin tutor') {
+          activeTutors.add(assignedTutor);
+        }
     }
     
     _isActive = s?.isActive ?? true;
@@ -1332,11 +1229,13 @@ class _StudentDialogState extends State<_StudentDialog> {
   Widget build(BuildContext context) {
     final isEdit = widget.student != null;
     
-    final activeTutors = widget.tutors.where((t) => t.isActive).toList();
+    final activeTutors = widget.tutors.where((t) => t.isActive && t.name != 'Sin tutor').toList();
     
     if (isEdit && _selectedTutorId.isNotEmpty && !activeTutors.any((t) => t.id == _selectedTutorId)) {
       final assignedTutor = widget.tutors.firstWhere((t) => t.id == _selectedTutorId, orElse: () => Tutor(id: _selectedTutorId, name: 'Desconocido (Baja)', department: '', careers: []));
-      activeTutors.insert(0, assignedTutor);
+      if (assignedTutor.name != 'Sin tutor') {
+        activeTutors.insert(0, assignedTutor);
+      }
     }
 
     return Dialog(
@@ -1378,7 +1277,9 @@ class _StudentDialogState extends State<_StudentDialog> {
                 value: _selectedCareer.isEmpty ? null : _selectedCareer,
                 decoration: _inputDeco('Licenciatura'),
                 dropdownColor: AppTheme.surfaceLight,
+                // Filtramos "S/L" para que no se pueda elegir manualmente
                 items: widget.careersCatalog
+                    .where((c) => c.abbreviation != 'S/L')
                     .map((c) => DropdownMenuItem(value: c.abbreviation, child: Text(c.abbreviation, style: const TextStyle(color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)))
                     .toList(),
                 onChanged: (v) => setState(() => _selectedCareer = v!),
