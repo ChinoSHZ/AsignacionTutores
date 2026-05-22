@@ -340,7 +340,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
   void _showCareerChangeDialog(Student student) {
     String initialVal = student.career;
     
-    // Si tiene S/L, seleccionamos la primera carrera válida disponible para evitar errores
     if (initialVal == 'S/L') {
       final validCareers = _apiCareers.where((c) => c.abbreviation != 'S/L');
       if (validCareers.isNotEmpty) {
@@ -353,7 +352,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       builder: (_) => _QuickChangeDialog<String>(
         title: 'Cambiar Licenciatura',
         currentValue: initialVal,
-        // Ocultamos la opción 'S/L'
         options: _apiCareers.where((c) => c.abbreviation != 'S/L').map((c) => c.abbreviation).toList(),
         labelBuilder: (val) => val,
         onSave: (newCareer) {
@@ -388,7 +386,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
     }
     final paginatedStudents = filtered.skip(_currentPage * _itemsPerPage).take(_itemsPerPage).toList();
 
-    // Filtramos para que 'S/L' no aparezca en el combo de la tabla principal
     final careerOptions = [
       'Todas', 
       ..._apiCareers.where((c) => c.abbreviation != 'S/L').map((c) => c.abbreviation)
@@ -545,7 +542,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               border: Border.all(color: AppTheme.border)),
           child: const Row(children: [
             Expanded(flex: 3, child: _TableHeader('Alumno (ID / Cuenta)')),
-            Expanded(flex: 2, child: _TableHeader('Licenciatura')),
+            Expanded(flex: 1, child: _TableHeader('Carrera')),
+            Expanded(flex: 1, child: _TableHeader('Ingreso')),
             Expanded(flex: 3, child: _TableHeader('Tutor (Estado)')),
             Expanded(flex: 2, child: _TableHeader('Movilidad')),
             Expanded(flex: 1, child: _TableHeader('Estado')),
@@ -612,7 +610,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                             )),
 
                         Expanded(
-                            flex: 2,
+                            flex: 1,
                             child: InkWell(
                               onTap: () => _showCareerChangeDialog(s),
                               borderRadius: BorderRadius.circular(6),
@@ -620,21 +618,38 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                                 padding: const EdgeInsets.symmetric(vertical: 2.0),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                                       decoration: BoxDecoration(
                                           color: AppTheme.accent.withOpacity(0.1),
                                           borderRadius: BorderRadius.circular(4)),
                                       child: Text(s.career,
                                           style: const TextStyle(
-                                              color: AppTheme.accentLight, fontSize: 10, fontWeight: FontWeight.bold)),
+                                              color: AppTheme.accentLight, fontSize: 11, fontWeight: FontWeight.bold)),
                                     ),
-                                    const SizedBox(height: 4),
-                                    Text('Ingreso: ${s.entryPeriod}',
-                                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10)),
                                   ],
                                 ),
+                              ),
+                            )),
+
+                        Expanded(
+                            flex: 1,
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                    color: const Color(0xFF9B59B6).withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: const Color(0xFF9B59B6).withOpacity(0.3))),
+                                child: Text(s.entryPeriod.isEmpty ? 'N/A' : s.entryPeriod,
+                                    style: const TextStyle(
+                                        color: Color(0xFF9B59B6),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.5)),
                               ),
                             )),
 
@@ -1128,7 +1143,6 @@ class _StudentDialogState extends State<_StudentDialog> {
     final careerExists = widget.careersCatalog.any((c) => c.abbreviation == s?.career);
     final validCareers = widget.careersCatalog.where((c) => c.abbreviation != 'S/L').toList();
     
-    // Si el alumno tiene "S/L", se preselecciona la primera carrera válida para forzar el cambio.
     _selectedCareer = (careerExists && s != null && s.career != 'S/L')
         ? s.career
         : (validCareers.isNotEmpty ? validCareers.first.abbreviation : '');
@@ -1277,7 +1291,6 @@ class _StudentDialogState extends State<_StudentDialog> {
                 value: _selectedCareer.isEmpty ? null : _selectedCareer,
                 decoration: _inputDeco('Licenciatura'),
                 dropdownColor: AppTheme.surfaceLight,
-                // Filtramos "S/L" para que no se pueda elegir manualmente
                 items: widget.careersCatalog
                     .where((c) => c.abbreviation != 'S/L')
                     .map((c) => DropdownMenuItem(value: c.abbreviation, child: Text(c.abbreviation, style: const TextStyle(color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)))

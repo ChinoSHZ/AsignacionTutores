@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../widgets/screen_wrapper.dart';
 
@@ -16,11 +17,43 @@ class _CopyGroupsScreenState extends State<CopyGroupsScreen> {
   bool _isLoading = true;
   List<dynamic> _tutors = [];
   String _searchQuery = '';
+  
+  Map<String, int> _copyCounts = {};
 
   @override
   void initState() {
     super.initState();
+    _loadCopyCounts();
     _fetchData();
+  }
+
+  Future<void> _loadCopyCounts() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? countsStr = prefs.getString('copy_groups_counts');
+      if (countsStr != null) {
+        final decoded = jsonDecode(countsStr);
+        if (decoded is Map) {
+          setState(() {
+            _copyCounts = Map<String, int>.from(decoded);
+          });
+        }
+      }
+    } catch (e) {
+      _copyCounts = {};
+    }
+  }
+
+  Future<void> _incrementCopyCount(String tutorId) async {
+    setState(() {
+      _copyCounts[tutorId] = (_copyCounts[tutorId] ?? 0) + 1;
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('copy_groups_counts', jsonEncode(_copyCounts));
+    } catch (e) {
+      // Omisión silenciosa si falla el almacenamiento local
+    }
   }
 
   Future<void> _fetchData() async {
@@ -44,15 +77,13 @@ class _CopyGroupsScreenState extends State<CopyGroupsScreen> {
   @override
   Widget build(BuildContext context) {
     final filteredTutors = _tutors.where((t) {
-      final String name = t['nombre_completo'] ?? '${t['nombre']} ${t['apellido_paterno']}';
+      final String name = (t['nombre_completo'] ?? '${t['nombre'] ?? ''} ${t['apellido_paterno'] ?? ''}').trim();
       return _searchQuery.isEmpty || name.toLowerCase().contains(_searchQuery.toLowerCase());
     }).toList();
 
     return ScreenWrapper(
       title: 'Copiar Grupos',
       subtitle: 'Extraer matrículas de tutorados activos para reportes.',
-      // SOLUCIÓN DE OVERFLOW: El ScreenWrapper envuelve sus 'child' en un SingleChildScrollView.
-      // Por tanto, usar Expanded dentro de él causa el error. En su lugar usamos 'shrinkWrap: true' y 'NeverScrollableScrollPhysics' en la lista.
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -90,17 +121,19 @@ class _CopyGroupsScreenState extends State<CopyGroupsScreen> {
             const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('No se encontraron profesores', style: TextStyle(color: AppTheme.textSecondary))))
           else
             ListView.builder(
-              shrinkWrap: true, // Importante para que la lista funcione dentro de un SingleChildScrollView (ScreenWrapper)
-              physics: const NeverScrollableScrollPhysics(), // Evita scroll conflictivo
+              shrinkWrap: true, 
+              physics: const NeverScrollableScrollPhysics(), 
               itemCount: filteredTutors.length,
               itemBuilder: (context, index) {
                 final tutor = filteredTutors[index];
-                final String tutorName = tutor['nombre_completo'] ?? '${tutor['nombre']} ${tutor['apellido_paterno']}';
+                final String tutorId = tutor['id']?.toString() ?? 'unknown_$index';
+                final String tutorName = (tutor['nombre_completo'] ?? '${tutor['nombre'] ?? ''} ${tutor['apellido_paterno'] ?? ''}').trim();
+                final String displayAvatar = tutorName.isNotEmpty ? tutorName[0].toUpperCase() : '?';
                 
                 List<dynamic> activeStudents = [];
-                if (tutor['grupos'] != null && tutor['grupos'].isNotEmpty) {
+                if (tutor['grupos'] != null && tutor['grupos'] is List) {
                   for (var group in tutor['grupos']) {
-                    if (group['tutorados'] != null) {
+                    if (group['tutorados'] != null && group['tutorados'] is List) {
                       for (var student in group['tutorados']) {
                         if (student['is_active'] == 1 || student['is_active'] == true) {
                           activeStudents.add(student);
@@ -111,14 +144,17 @@ class _CopyGroupsScreenState extends State<CopyGroupsScreen> {
                 }
 
                 String cuentasText = activeStudents.map((s) => s['numero_cuenta']).join(',\n');
+                
+                final int currentCopyCount = _copyCounts[tutorId] ?? 0;
+                final bool hasBeenCopied = currentCopyCount > 0;
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 16),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: AppTheme.surface,
+                    color: hasBeenCopied ? AppTheme.green.withOpacity(0.05) : AppTheme.surface,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.border),
+                    border: Border.all(color: hasBeenCopied ? AppTheme.green.withOpacity(0.4) : AppTheme.border),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -127,15 +163,27 @@ class _CopyGroupsScreenState extends State<CopyGroupsScreen> {
                         children: [
                           Container(
                             width: 38, height: 38,
-                            decoration: BoxDecoration(color: AppTheme.accent.withOpacity(0.15), shape: BoxShape.circle),
-                            child: Center(child: Text(tutorName[0], style: const TextStyle(color: AppTheme.accentLight, fontWeight: FontWeight.bold, fontSize: 16))),
+                            decoration: BoxDecoration(
+                              color: hasBeenCopied ? AppTheme.green.withOpacity(0.15) : AppTheme.accent.withOpacity(0.15), 
+                              shape: BoxShape.circle
+                            ),
+                            child: Center(
+                              child: Text(
+                                displayAvatar, 
+                                style: TextStyle(
+                                  color: hasBeenCopied ? AppTheme.green : AppTheme.accentLight, 
+                                  fontWeight: FontWeight.bold, 
+                                  fontSize: 16
+                                )
+                              )
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(tutorName, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 15)),
+                                Text(tutorName.isNotEmpty ? tutorName : 'Sin Nombre', style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 15)),
                                 Text('${activeStudents.length} alumnos activos', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                               ],
                             ),
@@ -143,13 +191,17 @@ class _CopyGroupsScreenState extends State<CopyGroupsScreen> {
                           ElevatedButton.icon(
                             onPressed: cuentasText.isEmpty ? null : () {
                               Clipboard.setData(ClipboardData(text: cuentasText)).then((_) {
+                                _incrementCopyCount(tutorId);
                                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Matrículas copiadas al portapapeles'), backgroundColor: AppTheme.green));
                               });
                             },
-                            icon: const Icon(Icons.copy_rounded, size: 16, color: Colors.white),
-                            label: const Text('Copiar', style: TextStyle(color: Colors.white)),
+                            icon: Icon(hasBeenCopied ? Icons.check_circle_outline_rounded : Icons.copy_rounded, size: 16, color: Colors.white),
+                            label: Text(
+                              hasBeenCopied ? 'Copiado ($currentCopyCount)' : 'Copiar', 
+                              style: const TextStyle(color: Colors.white)
+                            ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF3498DB),
+                              backgroundColor: hasBeenCopied ? AppTheme.green : const Color(0xFF3498DB),
                               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             ),
