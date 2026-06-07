@@ -267,6 +267,78 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
     }).toList();
   }
 
+  void _showTutorFilterDialog(List<(String, String)> options) {
+    String localSearchQuery = '';
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final filtered = options.where((o) => localSearchQuery.isEmpty || o.$2.toLowerCase().contains(localSearchQuery.toLowerCase())).toList();
+          return Dialog(
+            backgroundColor: AppTheme.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Container(
+              width: 400,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Filtrar por Tutor', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    onChanged: (v) => setModalState(() => localSearchQuery = v),
+                    style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar tutor...',
+                      hintStyle: const TextStyle(color: AppTheme.textSecondary),
+                      prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary, size: 18),
+                      filled: true,
+                      fillColor: AppTheme.bg,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 300,
+                    child: filtered.isEmpty
+                        ? const Center(child: Text('No se encontraron tutores', style: TextStyle(color: AppTheme.textSecondary)))
+                        : ListView.separated(
+                            itemCount: filtered.length,
+                            separatorBuilder: (_, __) => const Divider(color: AppTheme.border),
+                            itemBuilder: (_, i) {
+                              final t = filtered[i];
+                              return ListTile(
+                                title: Text(t.$2, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
+                                onTap: () {
+                                  setState(() {
+                                    _filterTutor = t.$1;
+                                    _currentPage = 0;
+                                  });
+                                  Navigator.pop(ctx);
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cerrar', style: TextStyle(color: AppTheme.textSecondary)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _showReassignDialog(Student student) {
     final available = _realTutors.where((t) => t.id != student.tutorId && t.isActive && t.name != 'Sin tutor' && t.students.where((st) => st.isActive).length < 35).toList();
     showDialog(
@@ -401,6 +473,23 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       ...availableTutorsForFilter.map((t) => (t.id, t.name))
     ];
 
+    int totalAlumnos = 0;
+    for (var t in availableTutorsForFilter) {
+      totalAlumnos += t.students.where((st) => st.isActive).length;
+    }
+    int average = availableTutorsForFilter.isNotEmpty ? (totalAlumnos / availableTutorsForFilter.length).round() : 30;
+    
+    int minBalanced = (average - 3).clamp(1, 999);
+    int maxBalanced = average + 3;
+    int minWarning = (average - 5).clamp(1, 999);
+    int maxWarning = average + 5;
+
+    Color getDynamicColor(int count) {
+      if (count >= minBalanced && count <= maxBalanced) return AppTheme.green;
+      if (count >= minWarning && count <= maxWarning) return AppTheme.yellow;
+      return AppTheme.red;
+    }
+
     return ScreenWrapper(
       title: 'Revisión de Asignaciones',
       subtitle: 'Gestión manual de asignaciones. ${filtered.length} registros en total.',
@@ -488,24 +577,33 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                       })),
               const SizedBox(width: 10),
               Expanded(
-                  child: DropdownButtonFormField<String>(
-                isExpanded: true,
-                value: _filterTutor,
-                decoration: InputDecoration(
-                    labelText: 'Tutor',
-                    labelStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                    filled: true,
-                    fillColor: AppTheme.bg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
-                dropdownColor: AppTheme.surfaceLight,
-                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                items: tutorOptions.map((t) => DropdownMenuItem(value: t.$1, child: Text(t.$2, overflow: TextOverflow.ellipsis))).toList(),
-                onChanged: (v) => setState(() {
-                  _filterTutor = v ?? 'Todos';
-                  _currentPage = 0;
-                }),
-              )),
+                child: InkWell(
+                  onTap: () => _showTutorFilterDialog(tutorOptions),
+                  borderRadius: BorderRadius.circular(10),
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                        labelText: 'Tutor',
+                        labelStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                        filled: true,
+                        fillColor: AppTheme.bg,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            tutorOptions.firstWhere((t) => t.$1 == _filterTutor, orElse: () => ('Todos', 'Todos')).$2,
+                            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down_rounded, color: AppTheme.textSecondary),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: _loadingSemestres
@@ -530,6 +628,29 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               ),
             ]),
           ]),
+        ),
+
+        const SizedBox(height: 16),
+
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('Semáforo de balanceo ($_filterCareer): ', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 16),
+              _LegendDot(AppTheme.green, '$minBalanced–$maxBalanced Equilibrado'),
+              const SizedBox(width: 20),
+              _LegendDot(AppTheme.yellow, '$minWarning–$maxWarning Leve desvío'),
+              const SizedBox(width: 20),
+              _LegendDot(AppTheme.red, '<$minWarning o >$maxWarning Crítico'),
+            ],
+          ),
         ),
 
         const SizedBox(height: 16),
@@ -685,7 +806,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                                     ),
                                     Row(children: [
                                       Text('$activeStudentsCount alumnos • ',
-                                          style: TextStyle(color: isSinTutor ? AppTheme.red : AppTheme.statusColor(tutor.status), fontSize: 10)),
+                                          style: TextStyle(color: isSinTutor ? AppTheme.red : getDynamicColor(activeStudentsCount), fontSize: 10)),
                                       Text(tutor.isActive ? 'Activo' : 'Baja',
                                           style: TextStyle(
                                               color: tutor.isActive ? AppTheme.green : AppTheme.red,
@@ -1392,4 +1513,16 @@ class _StudentDialogState extends State<_StudentDialog> {
       decoration: _inputDeco(label),
     );
   }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot(this.color, this.label);
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+    Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+    const SizedBox(width: 6),
+    Text(label, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+  ]);
 }

@@ -106,30 +106,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Center(child: CircularProgressIndicator(color: AppTheme.accent)),
       );
     }
-    
-    int totalAlumnos = 0;
-    int reasignados = 0;
-    int bloqueados = 0;
-    int nuevos = 0;
 
-    for (var t in _realTutors) {
-      totalAlumnos += t.count;
-      reasignados += t.students.where((s) => s.mobility == MobilityFlag.canChange).length;
-      bloqueados += t.students.where((s) => s.mobility == MobilityFlag.noChange).length;
-      nuevos += t.students.where((s) => s.mobility == MobilityFlag.newStudent).length;
-    }
-
-    int average = _realTutors.isNotEmpty ? (totalAlumnos / _realTutors.length).round() : 30;
-    
-    // MODIFICACIÓN: Se asegura que el valor mínimo sea 1
-    int minBalanced = (average - 3).clamp(1, 999);
-    int maxBalanced = average + 3;
-    int minWarning = (average - 5).clamp(1, 999);
-    int maxWarning = average + 5;
-
-    final critical = _realTutors.where((t) => t.count < minWarning || t.count > maxWarning).length;
-    final balanced = _realTutors.where((t) => t.count >= minBalanced && t.count <= maxBalanced).length;
-
+    // 1. Extraer y filtrar las carreras primero
     final Set<String> allCareers = {};
     for (var t in _realTutors) {
       allCareers.addAll(t.careers);
@@ -140,6 +118,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (_filterCareer == 'Todas') return true;
       return t.careers.contains(_filterCareer);
     }).toList();
+    
+    // 2. Calcular métricas basadas unicamente en los tutores filtrados
+    int totalAlumnos = 0;
+    int reasignados = 0;
+    int bloqueados = 0;
+    int nuevos = 0;
+
+    for (var t in filteredTutors) {
+      totalAlumnos += t.count;
+      reasignados += t.students.where((s) => s.mobility == MobilityFlag.canChange).length;
+      bloqueados += t.students.where((s) => s.mobility == MobilityFlag.noChange).length;
+      nuevos += t.students.where((s) => s.mobility == MobilityFlag.newStudent).length;
+    }
+
+    int average = filteredTutors.isNotEmpty ? (totalAlumnos / filteredTutors.length).round() : 30;
+    
+    int minBalanced = (average - 3).clamp(1, 999);
+    int maxBalanced = average + 3;
+    int minWarning = (average - 5).clamp(1, 999);
+    int maxWarning = average + 5;
+
+    final critical = filteredTutors.where((t) => t.count < minWarning || t.count > maxWarning).length;
+    final balanced = filteredTutors.where((t) => t.count >= minBalanced && t.count <= maxBalanced).length;
 
     return ScreenWrapper(
       title: 'Dashboard de Supervisión',
@@ -154,7 +155,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(width: 16),
           Expanded(child: _MetricCard('$bloqueados', 'Bloqueados', Icons.lock_rounded, AppTheme.red, '"No Cambiar" sin mover')),
           const SizedBox(width: 16),
-          Expanded(child: _MetricCard('$balanced / ${_realTutors.length}', 'Grupos Balanceados', Icons.balance_rounded, AppTheme.green, 'Meta: $minBalanced-$maxBalanced alumnos')),
+          Expanded(child: _MetricCard('$balanced / ${filteredTutors.length}', 'Grupos Balanceados', Icons.balance_rounded, AppTheme.green, 'Meta: $minBalanced-$maxBalanced alumnos')),
         ]),
 
         const SizedBox(height: 24),
@@ -297,7 +298,6 @@ class _CompactTutorCard extends StatelessWidget {
   const _CompactTutorCard({required this.tutor, required this.average});
 
   BalanceStatus _getDynamicStatus() {
-    // MODIFICACIÓN: Se asegura que el valor mínimo sea 1 en la lógica de la tarjeta
     int lowBalanced = (average - 3).clamp(1, 999);
     int highBalanced = average + 3;
     int lowWarning = (average - 5).clamp(1, 999);
