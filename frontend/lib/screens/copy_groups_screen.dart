@@ -77,7 +77,8 @@ class _CopyGroupsScreenState extends State<CopyGroupsScreen> {
   @override
   Widget build(BuildContext context) {
     final filteredTutors = _tutors.where((t) {
-      final String name = (t['nombre_completo'] ?? '${t['nombre'] ?? ''} ${t['apellido_paterno'] ?? ''}').trim();
+      // MODIFICACIÓN: Se incluye el apellido materno en la búsqueda
+      final String name = '${t['nombre'] ?? ''} ${t['apellido_paterno'] ?? ''} ${t['apellido_materno'] ?? ''}'.trim();
       return _searchQuery.isEmpty || name.toLowerCase().contains(_searchQuery.toLowerCase());
     }).toList();
 
@@ -127,7 +128,8 @@ class _CopyGroupsScreenState extends State<CopyGroupsScreen> {
               itemBuilder: (context, index) {
                 final tutor = filteredTutors[index];
                 final String tutorId = tutor['id']?.toString() ?? 'unknown_$index';
-                final String tutorName = (tutor['nombre_completo'] ?? '${tutor['nombre'] ?? ''} ${tutor['apellido_paterno'] ?? ''}').trim();
+                // MODIFICACIÓN: Se incluye el apellido materno en la vista de la tarjeta
+                final String tutorName = '${tutor['nombre'] ?? ''} ${tutor['apellido_paterno'] ?? ''} ${tutor['apellido_materno'] ?? ''}'.trim();
                 final String displayAvatar = tutorName.isNotEmpty ? tutorName[0].toUpperCase() : '?';
                 
                 List<dynamic> activeStudents = [];
