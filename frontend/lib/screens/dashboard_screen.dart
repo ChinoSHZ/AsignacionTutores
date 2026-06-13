@@ -107,19 +107,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
-    // 1. Extraer y filtrar las carreras primero
-    final Set<String> allCareers = {};
+    // Inyección de carrera S/L
+    final Set<String> allCareers = {'S/L'};
     for (var t in _realTutors) {
-      allCareers.addAll(t.careers);
+      if (t.careers.isEmpty) {
+        allCareers.add('S/L');
+      } else {
+        allCareers.addAll(t.careers);
+      }
     }
     final filterOptions = ['Todas', ...allCareers.toList()..sort()];
 
     final filteredTutors = _realTutors.where((t) {
       if (_filterCareer == 'Todas') return true;
+      if (_filterCareer == 'S/L' && t.careers.isEmpty) return true;
       return t.careers.contains(_filterCareer);
     }).toList();
     
-    // 2. Calcular métricas basadas unicamente en los tutores filtrados
     int totalAlumnos = 0;
     int reasignados = 0;
     int bloqueados = 0;
@@ -199,7 +203,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               const Text('Semáforo: ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
               const SizedBox(width: 12),
-              _LegendDot(AppTheme.green, '$minBalanced–$maxBalanced Equilibrado'),
+              
+              // INCIO DE CÓDIGO MODIFICADO
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 10, height: 10, decoration: const BoxDecoration(color: AppTheme.green, shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                RichText(
+                  text: TextSpan(
+                    text: '$minBalanced–$maxBalanced ',
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontFamily: 'Roboto'),
+                    children: [
+                      const TextSpan(text: '(Ideal: '),
+                      TextSpan(text: '$average', style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w900, fontSize: 13)),
+                      const TextSpan(text: ') Equilibrado'),
+                    ],
+                  ),
+                ),
+              ]),
+              // FIN DE CÓDIGO MODIFICADO
+
               const SizedBox(width: 20),
               _LegendDot(AppTheme.yellow, '$minWarning–$maxWarning Leve desvío'),
               const SizedBox(width: 20),

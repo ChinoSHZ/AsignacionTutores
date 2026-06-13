@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Storage;
 use App\Http\Controllers\CargaDatosController;
 use App\Http\Controllers\Api\AsignacionController;
 use App\Http\Controllers\Api\SemestreController;
+use App\Http\Controllers\ProfesorController;
 
 Route::post('/login', function (Request $request) {
     $request->validate([
@@ -243,38 +244,29 @@ Route::delete('/licenciaturas/{id}', function ($id) {
     try {
         \Illuminate\Support\Facades\DB::beginTransaction();
 
-        // 1. Asegurar que existe la licenciatura comodín
         $sinLic = App\Models\Licenciatura::firstOrCreate(
             ['abreviatura' => 'S/L'],
             ['codigo' => 'C00', 'nombre' => 'Sin licenciatura']
         );
 
-        // Protección: Evitar que alguien borre la licenciatura comodín por error
         if ($id == $sinLic->id) {
             return response()->json(['status' => 'FAILED', 'error' => 'No se puede eliminar la categoría de respaldo.'], 403);
         }
 
-        // 2. Reasignar Alumnos (Tutorados) que tengan esta licenciatura
         App\Models\Tutorado::where('licenciatura_id', $id)->update(['licenciatura_id' => $sinLic->id]);
 
-        // 3. Reasignar Profesores
-        // Buscamos a los profesores que tienen la licenciatura que se va a borrar
         $profesores = App\Models\Profesor::whereHas('licenciaturas', function ($query) use ($id) {
             $query->where('licenciaturas.id', $id);
         })->get();
 
         foreach ($profesores as $profesor) {
-            // Le quitamos la licenciatura que se va a eliminar
             $profesor->licenciaturas()->detach($id);
 
-            // Verificamos si se quedó sin ninguna licenciatura en absoluto
             if ($profesor->licenciaturas()->count() === 0) {
-                // Le asignamos la licenciatura comodín
                 $profesor->licenciaturas()->attach($sinLic->id);
             }
         }
 
-        // 4. Finalmente, procedemos a borrar la licenciatura original
         App\Models\Licenciatura::destroy($id);
 
         \Illuminate\Support\Facades\DB::commit();
@@ -380,15 +372,17 @@ Route::delete('/profesores/{id}', function ($id) {
     }
 });
 
+// Endpoint principal corregido para limpieza masiva
 Route::post('/profesores/excel', function (Request $request) {
     $request->validate([
         'file' => 'required|file|mimes:xlsx,xls,csv'
     ]);
 
     try {
-        DB::beginTransaction();
+        // Ejecución de purga absoluta excluyendo explícitamente 'users' y 'licenciaturas'
+        DB::statement('TRUNCATE TABLE grupo_tutorado, grupos, tutorados, semestres, licenciatura_profesor, profesores CASCADE;');
 
-        Profesor::query()->delete();
+        DB::beginTransaction();
 
         $import = new class {};
         $data = \Maatwebsite\Excel\Facades\Excel::toArray($import, $request->file('file'))[0];
@@ -482,28 +476,13 @@ Route::get('/semestres', [SemestreController::class, 'index']);
 Route::post('/carga-masiva', [CargaDatosController::class, 'upload']);
 
 Route::get('/asignaciones/dashboard', function(Request $request) {
-    $filtroSemestre = $request->query('semestre', 'Todos');
-
+    // Consulta absoluta. Ya no se filtra por semestre de DB porque fue purgado previamente.
     $query = Grupo::with([
         'tutor.licenciaturas',
         'tutorados.licenciatura',
     ]);
 
-    if ($filtroSemestre !== 'Todos') {
-        $semestreObj = Semestre::where('clave', $filtroSemestre)->first();
-        if ($semestreObj) {
-            $query->where('semestre_id', $semestreObj->id);
-        } else {
-            return response()->json([
-                'semestres'     => Semestre::all(),
-                'tutores'       => [],
-                'licenciaturas' => Licenciatura::all(),
-            ]);
-        }
-    }
-
     $grupos = $query->get();
-
     $tutoresMap = [];
 
     foreach ($grupos as $grupo) {
@@ -562,7 +541,6 @@ Route::get('/asignaciones/dashboard', function(Request $request) {
     }
 
     return response()->json([
-        'semestres'     => Semestre::all(),
         'tutores'       => array_values($tutoresMap),
         'licenciaturas' => Licenciatura::all(),
     ]);

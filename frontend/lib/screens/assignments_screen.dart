@@ -35,9 +35,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
   String _filterMobility = 'Todas';
   String _filterTutor = 'Todos';
 
-  String _filterSemestre = 'Todos';
-  List<String> _semestres = ['Todos'];
-  bool _loadingSemestres = false;
+  String _filterPeriodo = 'Todos';
+  List<String> _periodosIngreso = ['Todos'];
 
   int _currentPage = 0;
   final int _itemsPerPage = 100;
@@ -45,30 +44,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadSemestres();
     _fetchAsignacionesRealTime(); 
-  }
-
-  Future<void> _loadSemestres() async {
-    setState(() => _loadingSemestres = true);
-    try {
-      final response = await http.get(
-        Uri.parse('http://127.0.0.1:8000/api/semestres'),
-        headers: {'Accept': 'application/json'},
-      );
-      if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
-        setState(() {
-          _semestres = [
-            'Todos',
-            ...data.map((s) => s['clave'].toString()),
-          ];
-        });
-      }
-    } catch (_) {
-    } finally {
-      setState(() => _loadingSemestres = false);
-    }
   }
 
   Future<void> _fetchAsignacionesRealTime() async {
@@ -115,13 +91,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
         }).toList();
       }
 
-      String url = 'http://127.0.0.1:8000/api/asignaciones/dashboard';
-      if (_filterSemestre != 'Todos') {
-        url += '?semestre=$_filterSemestre';
-      }
-
       final response = await http.get(
-        Uri.parse(url),
+        Uri.parse('http://127.0.0.1:8000/api/asignaciones/dashboard'),
         headers: {'Accept': 'application/json'},
       );
 
@@ -165,7 +136,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                     entryPeriod: stud['periodo_ingreso'] ?? '',
                     career: (stud['licenciatura'] != null) 
                         ? stud['licenciatura']['abreviatura'] 
-                        : 'N/A',
+                        : 'S/L',
                     isReentry: flag != MobilityFlag.newStudent,
                     mobility: flag,
                     tutorId: tId,
@@ -195,17 +166,25 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
           }
         }
 
+        // Extracción dinámica de los periodos de ingreso para el filtro
+        final Set<String> extractedPeriods = {};
+        for (var s in loadedStudents) {
+          if (s.entryPeriod.isNotEmpty) extractedPeriods.add(s.entryPeriod);
+        }
+        final periodList = extractedPeriods.toList()..sort();
+
         setState(() {
           _apiCareers = loadedCareers;
           _realTutors = fullTutorsList;
           _realStudents = loadedStudents;
+          _periodosIngreso = ['Todos', ...periodList];
+          if (!_periodosIngreso.contains(_filterPeriodo)) _filterPeriodo = 'Todos';
           _isLoading = false;
         });
       } else {
         setState(() => _isLoading = false);
       }
     } catch (e) {
-      print("Error cargando asignaciones: $e");
       setState(() => _isLoading = false);
     }
   }
@@ -259,11 +238,11 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
           s.accountNumber.contains(_searchQuery) ||
           s.id.toLowerCase().contains(_searchQuery.toLowerCase());
       final matchCareer = _filterCareer == 'Todas' || s.career == _filterCareer;
-      final matchMobility = _filterMobility == 'Todas' ||
-          AppTheme.mobilityLabel(s.mobility) == _filterMobility;
+      final matchMobility = _filterMobility == 'Todas' || AppTheme.mobilityLabel(s.mobility) == _filterMobility;
       final matchTutor = _filterTutor == 'Todos' || s.tutorId == _filterTutor;
+      final matchPeriodo = _filterPeriodo == 'Todos' || s.entryPeriod == _filterPeriodo;
       
-      return matchSearch && matchCareer && matchMobility && matchTutor;
+      return matchSearch && matchCareer && matchMobility && matchTutor && matchPeriodo;
     }).toList();
   }
 
@@ -458,15 +437,21 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
     }
     final paginatedStudents = filtered.skip(_currentPage * _itemsPerPage).take(_itemsPerPage).toList();
 
-    final careerOptions = [
-      'Todas', 
-      ..._apiCareers.where((c) => c.abbreviation != 'S/L').map((c) => c.abbreviation)
-    ];
+    final Set<String> allCareers = {'S/L'};
+    for (var c in _apiCareers) {
+      allCareers.add(c.abbreviation);
+    }
+    final careerOptions = ['Todas', ...allCareers.toList()..sort()];
+
     final mobilities = ['Todas', 'Nuevo Ingreso', 'Sí Cambiar', 'No Cambiar'];
 
     final availableTutorsForFilter = _filterCareer == 'Todas'
         ? _realTutors.where((t) => t.name != 'Sin tutor').toList()
-        : _realTutors.where((t) => t.careers.contains(_filterCareer) && t.name != 'Sin tutor').toList();
+        : _realTutors.where((t) {
+            if (t.name == 'Sin tutor') return false;
+            if (_filterCareer == 'S/L' && t.careers.isEmpty) return true;
+            return t.careers.contains(_filterCareer);
+          }).toList();
 
     final tutorOptions = [
       ('Todos', 'Todos'),
@@ -525,8 +510,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               
               IconButton(
                 onPressed: () {
-                  setState(() => _isLoading = true);
-                  _loadSemestres();
                   _fetchAsignacionesRealTime();
                 },
                 icon: const Icon(Icons.refresh_rounded),
@@ -606,25 +589,17 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _loadingSemestres
-                    ? const Center(
-                        child: SizedBox(
-                          width: 20, height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent),
-                        ),
-                      )
-                    : _DropdownFilter<String>(
-                        label: 'Semestre',
-                        value: _filterSemestre,
-                        options: _semestres,
-                        onChanged: (v) {
-                          setState(() {
-                            _filterSemestre = v ?? 'Todos';
-                            _currentPage = 0;
-                          });
-                          _fetchAsignacionesRealTime();
-                        },
-                      ),
+                child: _DropdownFilter<String>(
+                    label: 'Ingreso',
+                    value: _filterPeriodo,
+                    options: _periodosIngreso,
+                    onChanged: (v) {
+                      setState(() {
+                        _filterPeriodo = v ?? 'Todos';
+                        _currentPage = 0;
+                      });
+                    },
+                  ),
               ),
             ]),
           ]),
@@ -644,7 +619,21 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
             children: [
               Text('Semáforo de balanceo ($_filterCareer): ', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
               const SizedBox(width: 16),
-              _LegendDot(AppTheme.green, '$minBalanced–$maxBalanced Equilibrado'),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 10, height: 10, decoration: const BoxDecoration(color: AppTheme.green, shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                RichText(
+                  text: TextSpan(
+                    text: '$minBalanced–$maxBalanced ',
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                    children: [
+                      const TextSpan(text: '(Ideal: '),
+                      TextSpan(text: '$average', style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w900, fontSize: 13)),
+                      const TextSpan(text: ') Equilibrado'),
+                    ],
+                  ),
+                ),
+              ]),
               const SizedBox(width: 20),
               _LegendDot(AppTheme.yellow, '$minWarning–$maxWarning Leve desvío'),
               const SizedBox(width: 20),
