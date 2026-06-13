@@ -130,7 +130,6 @@ class CargaTutoriasService
                 
                 $semestreAnterior = Semestre::where('tipo', 'actual')->first();
                 if ($semestreAnterior && $semestreAnterior->clave !== $claveSemestre) {
-                    // DESTRUCCIÓN DE HISTORIAL DEL SEMESTRE ANTERIOR
                     DB::table('grupo_tutorado')->delete();
                     DB::table('grupos')->delete();
                     DB::table('semestres')->delete();
@@ -321,11 +320,19 @@ class CargaTutoriasService
                     }
                     shuffle($nuevosLicIds);
 
+                    // ALGORITMO ROUND-ROBIN PARA NUEVO INGRESO
+                    asort($capacidadTutores);
+                    $gruposLicArray = array_keys($capacidadTutores);
+                    $idxRR = 0;
+                    $totalGruposLic = count($gruposLicArray);
+
                     foreach ($nuevosLicIds as $tutoradoId) {
-                        asort($capacidadTutores);
-                        $grupoMinId = array_key_first($capacidadTutores);
-                        $matrizAsignaciones[$tutoradoId] = ['grupo_id' => $grupoMinId, 'movilidad' => 'nuevo_ingreso'];
-                        $capacidadTutores[$grupoMinId]++;
+                        if ($totalGruposLic > 0) {
+                            $grupoId = $gruposLicArray[$idxRR % $totalGruposLic];
+                            $matrizAsignaciones[$tutoradoId] = ['grupo_id' => $grupoId, 'movilidad' => 'nuevo_ingreso'];
+                            $capacidadTutores[$grupoId]++;
+                            $idxRR++;
+                        }
                     }
 
                     $lockedGroups = [];
@@ -347,7 +354,8 @@ class CargaTutoriasService
 
                         $candidatoId = null;
                         foreach ($matrizAsignaciones as $tId => $data) {
-                            if ($data['grupo_id'] === $maxGroupId && in_array($data['movilidad'], ['cambiar', 'nuevo_ingreso']) && isset($alumnosLicDb[$tId])) {
+                            // BLOQUEO DE NUEVO INGRESO: Solo se mueven alumnos etiquetados como 'cambiar'
+                            if ($data['grupo_id'] === $maxGroupId && $data['movilidad'] === 'cambiar' && isset($alumnosLicDb[$tId])) {
                                 $candidatoId = $tId; break;
                             }
                         }
