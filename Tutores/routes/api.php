@@ -611,3 +611,138 @@ Route::post('/tutorados', function (Illuminate\Http\Request $request) {
         return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
     }
 });
+
+Route::post('/asignaciones/rebalanceo-manual', function (Illuminate\Http\Request $request) {
+    try {
+        \Illuminate\Support\Facades\DB::beginTransaction();
+        
+        $semestreActual = \App\Models\Semestre::where('tipo', 'actual')->first();
+        if (!$semestreActual) {
+            throw new \Exception('No hay semestre activo configurado.');
+        }
+
+        // 1. SINCRONIZACIÓN DE GRUPOS (Incluye a los tutores recién dados de alta)
+        $tutoresActivos = \App\Models\Profesor::where('estado', 'Activo')->pluck('id')->toArray();
+        $gruposExistentes = \Illuminate\Support\Facades\DB::table('grupos')
+            ->where('semestre_id', $semestreActual->id)
+            ->pluck('id', 'tutor_id')
+            ->toArray();
+
+        $nuevosGrupos = [];
+        foreach ($tutoresActivos as $tutorId) {
+            if (!isset($gruposExistentes[$tutorId])) {
+                $nuevosGrupos[] = [
+                    'semestre_id' => $semestreActual->id,
+                    'tutor_id' => $tutorId,
+                    'estado_tutor' => 'activo',
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ];
+            }
+        }
+        if (!empty($nuevosGrupos)) {
+            \Illuminate\Support\Facades\DB::table('grupos')->insert($nuevosGrupos);
+            $gruposExistentes = \Illuminate\Support\Facades\DB::table('grupos')
+                ->where('semestre_id', $semestreActual->id)
+                ->pluck('id', 'tutor_id')
+                ->toArray();
+        }
+
+        // 2. EXTRACCIÓN DE DATOS AISLADOS POR CARRERA
+        $tutoresLic = \Illuminate\Support\Facades\DB::table('licenciatura_profesor')
+            ->get()
+            ->groupBy('licenciatura_id');
+        $licenciaturas = \App\Models\Licenciatura::all();
+        
+        $pivotData = \Illuminate\Support\Facades\DB::table('grupo_tutorado')
+            ->join('tutorados', 'grupo_tutorado.tutorado_id', '=', 'tutorados.id')
+            ->where('grupo_tutorado.semestre_id', $semestreActual->id)
+            ->where('grupo_tutorado.estado_tutorado', 'activo')
+            ->where('tutorados.is_active', true)
+            ->select('grupo_tutorado.*', 'tutorados.licenciatura_id')
+            ->get();
+
+        $pisoMinimo = 15;
+        $reasignados = 0;
+
+        // 3. ALGORITMO DE ROBO JUSTO POR DIFERENCIAL (1 a 1)
+        foreach ($licenciaturas as $lic) {
+            $profesoresLicIds = $tutoresLic->get($lic->id)?->pluck('profesor_id')->toArray() ?? [];
+            if (empty($profesoresLicIds)) {
+                $profesoresLicIds = $tutoresActivos;
+            }
+
+            $gruposLicIds = array_intersect_key($gruposExistentes, array_flip($profesoresLicIds));
+            if (empty($gruposLicIds)) continue;
+
+            $capacidades = array_fill_keys($gruposLicIds, 0);
+            $bolsaSiCambiar = array_fill_keys($gruposLicIds, []);
+
+            foreach ($pivotData as $row) {
+                if ($row->licenciatura_id == $lic->id && isset($capacidades[$row->grupo_id])) {
+                    $capacidades[$row->grupo_id]++;
+                    
+                    // REGLA DE INTOCABLES: Solo los "Cambiar" entran a la bolsa de robo. Nuevo Ingreso queda exento.
+                    if ($row->movilidad === 'cambiar') {
+                        $bolsaSiCambiar[$row->grupo_id][] = $row->tutorado_id;
+                    }
+                }
+            }
+
+            $totalGrupos = count($capacidades);
+            if ($totalGrupos <= 1) continue; // No se puede robar a uno mismo
+
+            while (true) {
+                // Seleccionar al receptor más necesitado
+                asort($capacidades);
+                $receptorId = array_key_first($capacidades);
+                $minCount = $capacidades[$receptorId];
+
+                // Ordenar para encontrar a los más llenos
+                arsort($capacidades);
+                $donanteId = null;
+                
+                foreach ($capacidades as $gId => $count) {
+                    if ($gId === $receptorId) continue;
+                    
+                    // CONDICIÓN DE BALANCEO PERFECTO: Si la brecha entre el más lleno y el más vacío es 1 o 0, detener todo.
+                    if (($count - $minCount) <= 1) {
+                        continue; 
+                    }
+
+                    // CANIBALISMO INJUSTO: Verificar piso mínimo y que el tutor tenga saldo en la bolsa
+                    if ($count > $pisoMinimo && count($bolsaSiCambiar[$gId]) > 0) {
+                        $donanteId = $gId;
+                        break;
+                    }
+                }
+
+                // BOLSILLO VACÍO: Salida temprana si no hay donantes viables
+                if (!$donanteId) break;
+
+                // Extraer 1 alumno de la bolsa del donante
+                $alumnoRobadoId = array_pop($bolsaSiCambiar[$donanteId]);
+
+                \Illuminate\Support\Facades\DB::table('grupo_tutorado')
+                    ->where('tutorado_id', $alumnoRobadoId)
+                    ->where('semestre_id', $semestreActual->id)
+                    ->update([
+                        'grupo_id' => $receptorId,
+                        'updated_at' => now()
+                    ]);
+
+                // Actualizar métricas RAM para la siguiente iteración
+                $capacidades[$receptorId]++;
+                $capacidades[$donanteId]--;
+                $reasignados++;
+            }
+        }
+
+        \Illuminate\Support\Facades\DB::commit();
+        return response()->json(['status' => 'SUCCESS', 'message' => "Robo Justo completado. Se reubicaron $reasignados alumnos."]);
+
+    } catch (\Exception $e) {
+        \Illuminate\Support\Facades\DB::rollBack();
+        return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
+    }
+});

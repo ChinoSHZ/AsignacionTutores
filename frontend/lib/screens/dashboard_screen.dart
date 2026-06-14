@@ -51,7 +51,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       name: stud['nombre'],
                       accountNumber: stud['numero_cuenta'].toString(),
                       entryPeriod: stud['periodo_ingreso'] ?? '',
-                      career: stud['licenciatura'] != null ? stud['licenciatura']['abreviatura'] : '',
+                      career: stud['licenciatura'] != null ? stud['licenciatura']['abreviatura'] : 'S/L',
                       isReentry: flag != MobilityFlag.newStudent,
                       mobility: flag,
                       tutorId: t['id'].toString(),
@@ -62,14 +62,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
               }
             }
           }
-          loadedTutors.add(Tutor(
-            id: t['id'].toString(),
-            name: '${t['nombre']} ${t['apellido_paterno']}',
-            department: 'Ingeniería',
-            careers: t['licenciaturas'] != null ? (t['licenciaturas'] as List).map((l) => l['abreviatura'].toString()).toList() : [],
-            students: tutorStudents,
-            isActive: t['estado'] == 'Activo',
-          ));
+
+          // BIFURCACIÓN VIRTUAL POR CARRERA
+          List<String> officialCareers = (t['licenciaturas'] as List?)?.map((l) => l['abreviatura'].toString().trim()).toList() ?? [];
+          if (officialCareers.isEmpty) officialCareers.add('S/L');
+
+          Set<String> allCareersForTutor = {...officialCareers};
+          for (var s in tutorStudents) {
+             allCareersForTutor.add(s.career);
+          }
+
+          for (String c in allCareersForTutor) {
+             List<Student> careerStudents = tutorStudents.where((s) => s.career == c).toList();
+             if (!officialCareers.contains(c) && careerStudents.isEmpty) continue;
+
+             final virtualId = '${t['id']}_$c';
+             for (var s in careerStudents) {
+                s.tutorId = virtualId;
+             }
+
+             loadedTutors.add(Tutor(
+                id: virtualId,
+                name: '${t['nombre']} ${t['apellido_paterno']} ($c)',
+                department: 'Ingeniería',
+                careers: [c],
+                students: careerStudents,
+                isActive: t['estado'] == 'Activo',
+             ));
+          }
         }
         setState(() {
           _realTutors = loadedTutors;
@@ -107,7 +127,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
-    // Inyección de carrera S/L
     final Set<String> allCareers = {'S/L'};
     for (var t in _realTutors) {
       if (t.careers.isEmpty) {
@@ -203,8 +222,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               const Text('Semáforo: ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
               const SizedBox(width: 12),
-              
-              // INCIO DE CÓDIGO MODIFICADO
               Row(mainAxisSize: MainAxisSize.min, children: [
                 Container(width: 10, height: 10, decoration: const BoxDecoration(color: AppTheme.green, shape: BoxShape.circle)),
                 const SizedBox(width: 6),
@@ -220,8 +237,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
               ]),
-              // FIN DE CÓDIGO MODIFICADO
-
               const SizedBox(width: 20),
               _LegendDot(AppTheme.yellow, '$minWarning–$maxWarning Leve desvío'),
               const SizedBox(width: 20),
