@@ -51,7 +51,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       name: stud['nombre'],
                       accountNumber: stud['numero_cuenta'].toString(),
                       entryPeriod: stud['periodo_ingreso'] ?? '',
-                      career: stud['licenciatura'] != null ? stud['licenciatura']['abreviatura'] : '',
+                      career: stud['licenciatura'] != null ? stud['licenciatura']['abreviatura'] : 'S/L',
                       isReentry: flag != MobilityFlag.newStudent,
                       mobility: flag,
                       tutorId: t['id'].toString(),
@@ -62,14 +62,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
               }
             }
           }
-          loadedTutors.add(Tutor(
-            id: t['id'].toString(),
-            name: '${t['nombre']} ${t['apellido_paterno']}',
-            department: 'Ingeniería',
-            careers: t['licenciaturas'] != null ? (t['licenciaturas'] as List).map((l) => l['abreviatura'].toString()).toList() : [],
-            students: tutorStudents,
-            isActive: t['estado'] == 'Activo',
-          ));
+
+          // BIFURCACIÓN VIRTUAL POR CARRERA
+          List<String> officialCareers = (t['licenciaturas'] as List?)?.map((l) => l['abreviatura'].toString().trim()).toList() ?? [];
+          if (officialCareers.isEmpty) officialCareers.add('S/L');
+
+          Set<String> allCareersForTutor = {...officialCareers};
+          for (var s in tutorStudents) {
+             allCareersForTutor.add(s.career);
+          }
+
+          for (String c in allCareersForTutor) {
+             List<Student> careerStudents = tutorStudents.where((s) => s.career == c).toList();
+             if (!officialCareers.contains(c) && careerStudents.isEmpty) continue;
+
+             final virtualId = '${t['id']}_$c';
+             for (var s in careerStudents) {
+                s.tutorId = virtualId;
+             }
+
+             loadedTutors.add(Tutor(
+                id: virtualId,
+                name: '${t['nombre']} ${t['apellido_paterno']} ($c)',
+                department: 'Ingeniería',
+                careers: [c],
+                students: careerStudents,
+                isActive: t['estado'] == 'Activo',
+             ));
+          }
         }
         setState(() {
           _realTutors = loadedTutors;
@@ -106,40 +126,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Center(child: CircularProgressIndicator(color: AppTheme.accent)),
       );
     }
+
+    final Set<String> allCareers = {'S/L'};
+    for (var t in _realTutors) {
+      if (t.careers.isEmpty) {
+        allCareers.add('S/L');
+      } else {
+        allCareers.addAll(t.careers);
+      }
+    }
+    final filterOptions = ['Todas', ...allCareers.toList()..sort()];
+
+    final filteredTutors = _realTutors.where((t) {
+      if (_filterCareer == 'Todas') return true;
+      if (_filterCareer == 'S/L' && t.careers.isEmpty) return true;
+      return t.careers.contains(_filterCareer);
+    }).toList();
     
     int totalAlumnos = 0;
     int reasignados = 0;
     int bloqueados = 0;
     int nuevos = 0;
 
-    for (var t in _realTutors) {
+    for (var t in filteredTutors) {
       totalAlumnos += t.count;
       reasignados += t.students.where((s) => s.mobility == MobilityFlag.canChange).length;
       bloqueados += t.students.where((s) => s.mobility == MobilityFlag.noChange).length;
       nuevos += t.students.where((s) => s.mobility == MobilityFlag.newStudent).length;
     }
 
-    int average = _realTutors.isNotEmpty ? (totalAlumnos / _realTutors.length).round() : 30;
+    int average = filteredTutors.isNotEmpty ? (totalAlumnos / filteredTutors.length).round() : 30;
     
-    // MODIFICACIÓN: Se asegura que el valor mínimo sea 1
     int minBalanced = (average - 3).clamp(1, 999);
     int maxBalanced = average + 3;
     int minWarning = (average - 5).clamp(1, 999);
     int maxWarning = average + 5;
 
-    final critical = _realTutors.where((t) => t.count < minWarning || t.count > maxWarning).length;
-    final balanced = _realTutors.where((t) => t.count >= minBalanced && t.count <= maxBalanced).length;
-
-    final Set<String> allCareers = {};
-    for (var t in _realTutors) {
-      allCareers.addAll(t.careers);
-    }
-    final filterOptions = ['Todas', ...allCareers.toList()..sort()];
-
-    final filteredTutors = _realTutors.where((t) {
-      if (_filterCareer == 'Todas') return true;
-      return t.careers.contains(_filterCareer);
-    }).toList();
+    final critical = filteredTutors.where((t) => t.count < minWarning || t.count > maxWarning).length;
+    final balanced = filteredTutors.where((t) => t.count >= minBalanced && t.count <= maxBalanced).length;
 
     return ScreenWrapper(
       title: 'Dashboard de Supervisión',
@@ -154,7 +178,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(width: 16),
           Expanded(child: _MetricCard('$bloqueados', 'Bloqueados', Icons.lock_rounded, AppTheme.red, '"No Cambiar" sin mover')),
           const SizedBox(width: 16),
-          Expanded(child: _MetricCard('$balanced / ${_realTutors.length}', 'Grupos Balanceados', Icons.balance_rounded, AppTheme.green, 'Meta: $minBalanced-$maxBalanced alumnos')),
+          Expanded(child: _MetricCard('$balanced / ${filteredTutors.length}', 'Grupos Balanceados', Icons.balance_rounded, AppTheme.green, 'Meta: $minBalanced-$maxBalanced alumnos')),
         ]),
 
         const SizedBox(height: 24),
@@ -198,7 +222,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               const Text('Semáforo: ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
               const SizedBox(width: 12),
-              _LegendDot(AppTheme.green, '$minBalanced–$maxBalanced Equilibrado'),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 10, height: 10, decoration: const BoxDecoration(color: AppTheme.green, shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                RichText(
+                  text: TextSpan(
+                    text: '$minBalanced–$maxBalanced ',
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontFamily: 'Roboto'),
+                    children: [
+                      const TextSpan(text: '(Ideal: '),
+                      TextSpan(text: '$average', style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w900, fontSize: 13)),
+                      const TextSpan(text: ') Equilibrado'),
+                    ],
+                  ),
+                ),
+              ]),
               const SizedBox(width: 20),
               _LegendDot(AppTheme.yellow, '$minWarning–$maxWarning Leve desvío'),
               const SizedBox(width: 20),
@@ -297,7 +335,6 @@ class _CompactTutorCard extends StatelessWidget {
   const _CompactTutorCard({required this.tutor, required this.average});
 
   BalanceStatus _getDynamicStatus() {
-    // MODIFICACIÓN: Se asegura que el valor mínimo sea 1 en la lógica de la tarjeta
     int lowBalanced = (average - 3).clamp(1, 999);
     int highBalanced = average + 3;
     int lowWarning = (average - 5).clamp(1, 999);

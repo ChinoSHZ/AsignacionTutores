@@ -35,9 +35,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
   String _filterMobility = 'Todas';
   String _filterTutor = 'Todos';
 
-  String _filterSemestre = 'Todos';
-  List<String> _semestres = ['Todos'];
-  bool _loadingSemestres = false;
+  String _filterPeriodo = 'Todos';
+  List<String> _periodosIngreso = ['Todos'];
 
   int _currentPage = 0;
   final int _itemsPerPage = 100;
@@ -45,30 +44,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadSemestres();
     _fetchAsignacionesRealTime(); 
-  }
-
-  Future<void> _loadSemestres() async {
-    setState(() => _loadingSemestres = true);
-    try {
-      final response = await http.get(
-        Uri.parse('http://127.0.0.1:8000/api/semestres'),
-        headers: {'Accept': 'application/json'},
-      );
-      if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
-        setState(() {
-          _semestres = [
-            'Todos',
-            ...data.map((s) => s['clave'].toString()),
-          ];
-        });
-      }
-    } catch (_) {
-    } finally {
-      setState(() => _loadingSemestres = false);
-    }
   }
 
   Future<void> _fetchAsignacionesRealTime() async {
@@ -82,13 +58,13 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
       List<Tutor> fullTutorsList = [];
       if (profRes.statusCode == 200) {
         final List<dynamic> pData = jsonDecode(profRes.body);
-        fullTutorsList = pData.map((json) {
+        for (var json in pData) {
           final nombre = json['nombre'] ?? '';
           final apPat = json['apellido_paterno'] ?? '';
           final apMat = json['apellido_materno'] ?? '';
           final nombreCompleto = json['nombre_completo'] ?? '$nombre $apPat $apMat'.trim();
           
-          final String tutorId = json['id']?.toString() 
+          final String tId = json['id']?.toString() 
                 ?? json['id_profesor']?.toString() 
                 ?? json['profesor_id']?.toString() 
                 ?? '';
@@ -103,25 +79,23 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               }
             }
           }
+          if (carrerasList.isEmpty) carrerasList.add('S/L');
 
-          return Tutor(
-            id: tutorId,
-            name: nombreCompleto.isEmpty ? 'Sin Nombre' : nombreCompleto,
-            department: 'Ingeniería',
-            careers: carrerasList,
-            isActive: json['estado'] == 'Activo',
-            students: [],
-          );
-        }).toList();
-      }
-
-      String url = 'http://127.0.0.1:8000/api/asignaciones/dashboard';
-      if (_filterSemestre != 'Todos') {
-        url += '?semestre=$_filterSemestre';
+          for (String c in carrerasList) {
+             fullTutorsList.add(Tutor(
+               id: '${tId}_$c',
+               name: nombreCompleto.isEmpty ? 'Sin Nombre ($c)' : '$nombreCompleto ($c)',
+               department: 'Ingeniería',
+               careers: [c],
+               isActive: json['estado'] == 'Activo',
+               students: [],
+             ));
+          }
+        }
       }
 
       final response = await http.get(
-        Uri.parse(url),
+        Uri.parse('http://127.0.0.1:8000/api/asignaciones/dashboard'),
         headers: {'Accept': 'application/json'},
       );
 
@@ -142,9 +116,6 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
 
         for (var t in tutorsJson) {
           final tId = t['id'].toString();
-          int tutorIdx = fullTutorsList.indexWhere((x) => x.id == tId);
-          
-          List<Student> tutorStudents = [];
           
           if (t['grupos'] != null) {
             for (var grupo in t['grupos']) {
@@ -158,54 +129,60 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                   if (movilidadDB == 'cambiar') flag = MobilityFlag.canChange;
                   if (movilidadDB == 'nuevo_ingreso') flag = MobilityFlag.newStudent;
 
+                  final careerAbrev = stud['licenciatura'] != null ? stud['licenciatura']['abreviatura'] : 'S/L';
+                  final virtualTutorId = '${tId}_$careerAbrev';
+
                   var s = Student(
                     id: stud['id'].toString(),
                     name: '${stud['nombre']} ${stud['apellido_paterno']} ${stud['apellido_materno'] ?? ''}'.trim(),
                     accountNumber: stud['numero_cuenta'].toString(),
                     entryPeriod: stud['periodo_ingreso'] ?? '',
-                    career: (stud['licenciatura'] != null) 
-                        ? stud['licenciatura']['abreviatura'] 
-                        : 'N/A',
+                    career: careerAbrev,
                     isReentry: flag != MobilityFlag.newStudent,
                     mobility: flag,
-                    tutorId: tId,
+                    tutorId: virtualTutorId,
                     isActive: estadoTutoradoDB == 'activo',
                     wasReassigned: flag == MobilityFlag.canChange, 
                   );
-                  tutorStudents.add(s);
                   loadedStudents.add(s);
+                  
+                  int tutorIdx = fullTutorsList.indexWhere((x) => x.id == virtualTutorId);
+                  if (tutorIdx != -1) {
+                    fullTutorsList[tutorIdx].students.add(s);
+                  } else {
+                    fullTutorsList.add(Tutor(
+                      id: virtualTutorId,
+                      name: '${t['nombre']} ${t['apellido_paterno']} ($careerAbrev)',
+                      department: 'Ingeniería',
+                      careers: [careerAbrev],
+                      students: [s],
+                      isActive: t['estado'] == 'Activo',
+                    ));
+                  }
                 }
               }
             }
           }
-
-          if (tutorIdx != -1) {
-            fullTutorsList[tutorIdx].students.addAll(tutorStudents);
-          } else {
-            fullTutorsList.add(Tutor(
-              id: tId,
-              name: '${t['nombre']} ${t['apellido_paterno']}',
-              department: 'Ingeniería',
-              careers: (t['licenciaturas'] != null) 
-                  ? (t['licenciaturas'] as List).map((l) => l['abreviatura'] as String).toList() 
-                  : [],
-              students: tutorStudents,
-              isActive: t['estado'] == 'Activo',
-            ));
-          }
         }
+
+        final Set<String> extractedPeriods = {};
+        for (var s in loadedStudents) {
+          if (s.entryPeriod.isNotEmpty) extractedPeriods.add(s.entryPeriod);
+        }
+        final periodList = extractedPeriods.toList()..sort();
 
         setState(() {
           _apiCareers = loadedCareers;
           _realTutors = fullTutorsList;
           _realStudents = loadedStudents;
+          _periodosIngreso = ['Todos', ...periodList];
+          if (!_periodosIngreso.contains(_filterPeriodo)) _filterPeriodo = 'Todos';
           _isLoading = false;
         });
       } else {
         setState(() => _isLoading = false);
       }
     } catch (e) {
-      print("Error cargando asignaciones: $e");
       setState(() => _isLoading = false);
     }
   }
@@ -233,7 +210,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
           'apellido_materno': apMaterno,
           'periodo_ingreso': period.isEmpty ? 'N/A' : period,
           'licenciatura_abreviatura': careerAbrev,
-          'tutor_id': tutorId,
+          'tutor_id': tutorId.split('_')[0],
           'movilidad': movStr,
           'estado_tutorado': isActive,
         }),
@@ -252,6 +229,73 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
     }
   }
 
+  Future<void> _runManualRebalance() async {
+    Navigator.pop(context); 
+    setState(() => _isLoading = true);
+    
+    try {
+      final response = await http.post(
+        Uri.parse('http://127.0.0.1:8000/api/asignaciones/rebalanceo-manual'),
+        headers: {'Accept': 'application/json'},
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(data['message'] ?? 'Reasignación completada'),
+          backgroundColor: AppTheme.green,
+        ));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Error en el servidor al ejecutar el balanceo.'),
+          backgroundColor: AppTheme.red,
+        ));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Error de red al intentar reasignar.'),
+        backgroundColor: AppTheme.red,
+      ));
+    } finally {
+      await _fetchAsignacionesRealTime();
+    }
+  }
+
+  void _showRebalanceConfirmDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: const Row(
+          children: [
+            Icon(Icons.balance_rounded, color: AppTheme.yellow),
+            SizedBox(width: 10),
+            Text('Reasignación Automática', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'El algoritmo de Robo Justo removerá alumnos de los profesores que superan el promedio y los asignará a los profesores con déficit (Incluyendo los dados de alta recientemente).\n\n'
+          '• Se redistribuirán únicamente los alumnos marcados como "Sí Cambiar".\n'
+          '• Los alumnos de "Nuevo Ingreso" y "No cambiar" son intocables.\n'
+          '• Ningún profesor caerá de su piso mínimo.\n\n'
+          '¿Desea ejecutar este proceso?',
+          style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent),
+            onPressed: _runManualRebalance,
+            child: const Text('Ejecutar', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   List<Student> get _filtered {
     return _realStudents.where((s) {
       final matchSearch = _searchQuery.isEmpty ||
@@ -259,16 +303,96 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
           s.accountNumber.contains(_searchQuery) ||
           s.id.toLowerCase().contains(_searchQuery.toLowerCase());
       final matchCareer = _filterCareer == 'Todas' || s.career == _filterCareer;
-      final matchMobility = _filterMobility == 'Todas' ||
-          AppTheme.mobilityLabel(s.mobility) == _filterMobility;
+      final matchMobility = _filterMobility == 'Todas' || AppTheme.mobilityLabel(s.mobility) == _filterMobility;
       final matchTutor = _filterTutor == 'Todos' || s.tutorId == _filterTutor;
+      final matchPeriodo = _filterPeriodo == 'Todos' || s.entryPeriod == _filterPeriodo;
       
-      return matchSearch && matchCareer && matchMobility && matchTutor;
+      return matchSearch && matchCareer && matchMobility && matchTutor && matchPeriodo;
     }).toList();
   }
 
+  void _showTutorFilterDialog(List<(String, String)> options) {
+    String localSearchQuery = '';
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final filtered = options.where((o) => localSearchQuery.isEmpty || o.$2.toLowerCase().contains(localSearchQuery.toLowerCase())).toList();
+          return Dialog(
+            backgroundColor: AppTheme.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Container(
+              width: 400,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Filtrar por Tutor', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    onChanged: (v) => setModalState(() => localSearchQuery = v),
+                    style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar tutor...',
+                      hintStyle: const TextStyle(color: AppTheme.textSecondary),
+                      prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary, size: 18),
+                      filled: true,
+                      fillColor: AppTheme.bg,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 300,
+                    child: filtered.isEmpty
+                        ? const Center(child: Text('No se encontraron tutores', style: TextStyle(color: AppTheme.textSecondary)))
+                        : ListView.separated(
+                            itemCount: filtered.length,
+                            separatorBuilder: (_, __) => const Divider(color: AppTheme.border),
+                            itemBuilder: (_, i) {
+                              final t = filtered[i];
+                              return ListTile(
+                                title: Text(t.$2, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
+                                onTap: () {
+                                  setState(() {
+                                    _filterTutor = t.$1;
+                                    _currentPage = 0;
+                                  });
+                                  Navigator.pop(ctx);
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cerrar', style: TextStyle(color: AppTheme.textSecondary)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _showReassignDialog(Student student) {
-    final available = _realTutors.where((t) => t.id != student.tutorId && t.isActive && t.name != 'Sin tutor' && t.students.where((st) => st.isActive).length < 35).toList();
+    // Filtra evitando el mismo tutor real y forzando que el tutor imparta la misma licenciatura del alumno
+    final available = _realTutors.where((t) => 
+        t.id.split('_')[0] != student.tutorId.split('_')[0] && 
+        t.isActive && 
+        !t.name.contains('Sin tutor') && 
+        t.careers.contains(student.career) &&
+        t.students.where((st) => st.isActive).length < 35
+    ).toList();
+    
     showDialog(
       context: context,
       builder: (_) => _ReassignDialog(
@@ -386,20 +510,42 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
     }
     final paginatedStudents = filtered.skip(_currentPage * _itemsPerPage).take(_itemsPerPage).toList();
 
-    final careerOptions = [
-      'Todas', 
-      ..._apiCareers.where((c) => c.abbreviation != 'S/L').map((c) => c.abbreviation)
-    ];
+    final Set<String> allCareers = {'S/L'};
+    for (var c in _apiCareers) {
+      allCareers.add(c.abbreviation);
+    }
+    final careerOptions = ['Todas', ...allCareers.toList()..sort()];
+
     final mobilities = ['Todas', 'Nuevo Ingreso', 'Sí Cambiar', 'No Cambiar'];
 
     final availableTutorsForFilter = _filterCareer == 'Todas'
-        ? _realTutors.where((t) => t.name != 'Sin tutor').toList()
-        : _realTutors.where((t) => t.careers.contains(_filterCareer) && t.name != 'Sin tutor').toList();
+        ? _realTutors.where((t) => !t.name.contains('Sin tutor')).toList()
+        : _realTutors.where((t) {
+            if (t.name.contains('Sin tutor')) return false;
+            return t.careers.contains(_filterCareer);
+          }).toList();
 
     final tutorOptions = [
       ('Todos', 'Todos'),
       ...availableTutorsForFilter.map((t) => (t.id, t.name))
     ];
+
+    int totalAlumnos = 0;
+    for (var t in availableTutorsForFilter) {
+      totalAlumnos += t.students.where((st) => st.isActive).length;
+    }
+    int average = availableTutorsForFilter.isNotEmpty ? (totalAlumnos / availableTutorsForFilter.length).round() : 30;
+    
+    int minBalanced = (average - 3).clamp(1, 999);
+    int maxBalanced = average + 3;
+    int minWarning = (average - 5).clamp(1, 999);
+    int maxWarning = average + 5;
+
+    Color getDynamicColor(int count) {
+      if (count >= minBalanced && count <= maxBalanced) return AppTheme.green;
+      if (count >= minWarning && count <= maxWarning) return AppTheme.yellow;
+      return AppTheme.red;
+    }
 
     return ScreenWrapper(
       title: 'Revisión de Asignaciones',
@@ -434,15 +580,20 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
               ),
               const SizedBox(width: 16),
               
-              IconButton(
-                onPressed: () {
-                  setState(() => _isLoading = true);
-                  _loadSemestres();
-                  _fetchAsignacionesRealTime();
-                },
-                icon: const Icon(Icons.refresh_rounded),
-                color: AppTheme.accent,
-                tooltip: 'Actualizar datos',
+              ElevatedButton.icon(
+                onPressed: _showRebalanceConfirmDialog,
+                icon: const Icon(Icons.balance_rounded, size: 18),
+                label: const Text('Reasignar'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.yellow.withOpacity(0.15),
+                  foregroundColor: AppTheme.yellow,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(color: AppTheme.yellow.withOpacity(0.4)),
+                  ),
+                ),
               ),
               const SizedBox(width: 8),
               
@@ -488,48 +639,86 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                       })),
               const SizedBox(width: 10),
               Expanded(
-                  child: DropdownButtonFormField<String>(
-                isExpanded: true,
-                value: _filterTutor,
-                decoration: InputDecoration(
-                    labelText: 'Tutor',
-                    labelStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                    filled: true,
-                    fillColor: AppTheme.bg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
-                dropdownColor: AppTheme.surfaceLight,
-                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                items: tutorOptions.map((t) => DropdownMenuItem(value: t.$1, child: Text(t.$2, overflow: TextOverflow.ellipsis))).toList(),
-                onChanged: (v) => setState(() {
-                  _filterTutor = v ?? 'Todos';
-                  _currentPage = 0;
-                }),
-              )),
+                child: InkWell(
+                  onTap: () => _showTutorFilterDialog(tutorOptions),
+                  borderRadius: BorderRadius.circular(10),
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                        labelText: 'Tutor',
+                        labelStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                        filled: true,
+                        fillColor: AppTheme.bg,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            tutorOptions.firstWhere((t) => t.$1 == _filterTutor, orElse: () => ('Todos', 'Todos')).$2,
+                            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down_rounded, color: AppTheme.textSecondary),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(width: 10),
               Expanded(
-                child: _loadingSemestres
-                    ? const Center(
-                        child: SizedBox(
-                          width: 20, height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent),
-                        ),
-                      )
-                    : _DropdownFilter<String>(
-                        label: 'Semestre',
-                        value: _filterSemestre,
-                        options: _semestres,
-                        onChanged: (v) {
-                          setState(() {
-                            _filterSemestre = v ?? 'Todos';
-                            _currentPage = 0;
-                          });
-                          _fetchAsignacionesRealTime();
-                        },
-                      ),
+                child: _DropdownFilter<String>(
+                    label: 'Ingreso',
+                    value: _filterPeriodo,
+                    options: _periodosIngreso,
+                    onChanged: (v) {
+                      setState(() {
+                        _filterPeriodo = v ?? 'Todos';
+                        _currentPage = 0;
+                      });
+                    },
+                  ),
               ),
             ]),
           ]),
+        ),
+
+        const SizedBox(height: 16),
+
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('Semáforo de balanceo ($_filterCareer): ', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 16),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 10, height: 10, decoration: const BoxDecoration(color: AppTheme.green, shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                RichText(
+                  text: TextSpan(
+                    text: '$minBalanced–$maxBalanced ',
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                    children: [
+                      const TextSpan(text: '(Ideal: '),
+                      TextSpan(text: '$average', style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w900, fontSize: 13)),
+                      const TextSpan(text: ') Equilibrado'),
+                    ],
+                  ),
+                ),
+              ]),
+              const SizedBox(width: 20),
+              _LegendDot(AppTheme.yellow, '$minWarning–$maxWarning Leve desvío'),
+              const SizedBox(width: 20),
+              _LegendDot(AppTheme.red, '<$minWarning o >$maxWarning Crítico'),
+            ],
+          ),
         ),
 
         const SizedBox(height: 16),
@@ -571,7 +760,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                         orElse: () => _realTutors.first);
                     final mobilityColor = AppTheme.mobilityColor(s.mobility);
                     final isLocked = s.mobility == MobilityFlag.noChange;
-                    final isSinTutor = tutor.name == 'Sin tutor';
+                    final isSinTutor = tutor.name.contains('Sin tutor');
                     final activeStudentsCount = tutor.students.where((st) => st.isActive).length;
 
                     return Container(
@@ -685,7 +874,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen> {
                                     ),
                                     Row(children: [
                                       Text('$activeStudentsCount alumnos • ',
-                                          style: TextStyle(color: isSinTutor ? AppTheme.red : AppTheme.statusColor(tutor.status), fontSize: 10)),
+                                          style: TextStyle(color: isSinTutor ? AppTheme.red : getDynamicColor(activeStudentsCount), fontSize: 10)),
                                       Text(tutor.isActive ? 'Activo' : 'Baja',
                                           style: TextStyle(
                                               color: tutor.isActive ? AppTheme.green : AppTheme.red,
@@ -1149,18 +1338,28 @@ class _StudentDialogState extends State<_StudentDialog> {
 
     _selectedMobility = s?.mobility ?? MobilityFlag.newStudent;
     
-    final activeTutors = widget.tutors.where((t) => t.isActive && t.name != 'Sin tutor').toList();
+    // Obtener los tutores activos y que impartan la carrera seleccionada por defecto
+    final activeTutors = widget.tutors.where((t) => t.isActive && !t.name.contains('Sin tutor') && t.careers.contains(_selectedCareer)).toList();
     
     _selectedTutorId = s?.tutorId ?? (activeTutors.isNotEmpty ? activeTutors.first.id : '');
     
     if (s?.tutorId != null && !activeTutors.any((t) => t.id == s?.tutorId)) {
         final assignedTutor = widget.tutors.firstWhere((t) => t.id == s?.tutorId, orElse: () => Tutor(id: s!.tutorId, name: 'Desconocido', department: '', careers: []));
-        if (assignedTutor.name != 'Sin tutor') {
+        if (!assignedTutor.name.contains('Sin tutor')) {
           activeTutors.add(assignedTutor);
         }
     }
     
     _isActive = s?.isActive ?? true;
+  }
+
+  // Refresca la lista de tutores cuando el usuario cambia la carrera en el menú
+  void _onCareerChanged(String newCareer) {
+    setState(() {
+      _selectedCareer = newCareer;
+      final activeTutorsForCareer = widget.tutors.where((t) => t.isActive && !t.name.contains('Sin tutor') && t.careers.contains(newCareer)).toList();
+      _selectedTutorId = activeTutorsForCareer.isNotEmpty ? activeTutorsForCareer.first.id : '';
+    });
   }
 
   void _showTutorSelection(List<Tutor> activeTutors) {
@@ -1243,11 +1442,11 @@ class _StudentDialogState extends State<_StudentDialog> {
   Widget build(BuildContext context) {
     final isEdit = widget.student != null;
     
-    final activeTutors = widget.tutors.where((t) => t.isActive && t.name != 'Sin tutor').toList();
+    final activeTutors = widget.tutors.where((t) => t.isActive && !t.name.contains('Sin tutor') && t.careers.contains(_selectedCareer)).toList();
     
     if (isEdit && _selectedTutorId.isNotEmpty && !activeTutors.any((t) => t.id == _selectedTutorId)) {
       final assignedTutor = widget.tutors.firstWhere((t) => t.id == _selectedTutorId, orElse: () => Tutor(id: _selectedTutorId, name: 'Desconocido (Baja)', department: '', careers: []));
-      if (assignedTutor.name != 'Sin tutor') {
+      if (!assignedTutor.name.contains('Sin tutor')) {
         activeTutors.insert(0, assignedTutor);
       }
     }
@@ -1295,7 +1494,7 @@ class _StudentDialogState extends State<_StudentDialog> {
                     .where((c) => c.abbreviation != 'S/L')
                     .map((c) => DropdownMenuItem(value: c.abbreviation, child: Text(c.abbreviation, style: const TextStyle(color: AppTheme.textPrimary), overflow: TextOverflow.ellipsis)))
                     .toList(),
-                onChanged: (v) => setState(() => _selectedCareer = v!),
+                onChanged: (v) => _onCareerChanged(v!),
               ),
               const SizedBox(height: 16),
 
@@ -1392,4 +1591,16 @@ class _StudentDialogState extends State<_StudentDialog> {
       decoration: _inputDeco(label),
     );
   }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot(this.color, this.label);
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+    Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+    const SizedBox(width: 6),
+    Text(label, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+  ]);
 }
