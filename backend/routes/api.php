@@ -4,7 +4,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB; 
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use App\Models\User;
 use App\Models\Licenciatura;
@@ -18,6 +17,7 @@ use Illuminate\Support\Facades\Storage;
 use App\Http\Controllers\CargaDatosController;
 use App\Http\Controllers\Api\AsignacionController;
 use App\Http\Controllers\Api\SemestreController;
+use App\Http\Controllers\ProfesorController;
 
 Route::post('/login', function (Request $request) {
     $request->validate([
@@ -149,27 +149,17 @@ Route::post('/login/mfa-start', function (Request $request) {
     ], 200);
 });
 
-// --- ADAPTACIÓN SQLITE: BACKUP EXPORT ---
 Route::get('/backup/export', function (Request $request) {
-    $filename = $request->query('filename', 'respaldo_' . date('Y_m_d_His') . '.sqlite');
-    $dbPath = database_path('database.sqlite'); // Ruta nativa de SQLite en Laravel
-    
-    if (!file_exists($dbPath)) {
-        return response()->json(['error' => 'Base de datos no encontrada'], 404);
+    $filename = $request->query('filename', 'respaldo.sqlite');
+    $path = database_path('database.sqlite');
+
+    if (file_exists($path)) {
+        return Response::download($path, $filename);
     }
 
-    // Crear una copia temporal para evitar bloqueos de lectura/escritura durante la descarga
-    $tempPath = storage_path('app/' . $filename);
-    File::copy($dbPath, $tempPath);
-
-    if (file_exists($tempPath)) {
-        return Response::download($tempPath, $filename)->deleteFileAfterSend(true);
-    }
-
-    return response()->json(['error' => 'No se pudo generar el respaldo'], 500);
+    return response()->json(['error' => 'No se encontró la base de datos'], 500);
 });
 
-// --- ADAPTACIÓN SQLITE: BACKUP IMPORT ---
 Route::post('/backup/import', function (Request $request) {
     $request->validate([
         'backup_file' => 'required|file'
@@ -177,22 +167,20 @@ Route::post('/backup/import', function (Request $request) {
 
     try {
         $file = $request->file('backup_file');
-        $dbPath = database_path('database.sqlite');
+        $destinationPath = database_path('database.sqlite');
 
-        // Desconectar y purgar la conexión a la base de datos para liberar el archivo .sqlite
-        DB::purge('sqlite');
-        DB::disconnect('sqlite');
+        // Cerrar conexiones activas forzando recarga
+        DB::disconnect();
 
-        // Sobrescribir el archivo de la base de datos con el archivo subido
-        File::copy($file->getRealPath(), $dbPath);
+        // Sobrescribir archivo de base de datos
+        copy($file->getRealPath(), $destinationPath);
 
-        // Reconectar la base de datos
-        DB::reconnect('sqlite');
+        DB::reconnect();
 
         return response()->json(['status' => 'SUCCESS']);
     } catch (\Exception $e) {
-        \Illuminate\Support\Facades\Log::error("Error restaurando DB (SQLite):\n" . $e->getMessage());
-        return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
+        \Illuminate\Support\Facades\Log::error("Error restaurando DB SQLite: " . $e->getMessage());
+        return response()->json(['status' => 'FAILED'], 500);
     }
 });
 
@@ -234,7 +222,7 @@ Route::put('/licenciaturas/{id}', function (Illuminate\Http\Request $request, $i
 
 Route::delete('/licenciaturas/{id}', function ($id) {
     try {
-        DB::beginTransaction();
+        \Illuminate\Support\Facades\DB::beginTransaction();
 
         $sinLic = App\Models\Licenciatura::firstOrCreate(
             ['abreviatura' => 'S/L'],
@@ -253,6 +241,7 @@ Route::delete('/licenciaturas/{id}', function ($id) {
 
         foreach ($profesores as $profesor) {
             $profesor->licenciaturas()->detach($id);
+
             if ($profesor->licenciaturas()->count() === 0) {
                 $profesor->licenciaturas()->attach($sinLic->id);
             }
@@ -260,11 +249,11 @@ Route::delete('/licenciaturas/{id}', function ($id) {
 
         App\Models\Licenciatura::destroy($id);
 
-        DB::commit();
+        \Illuminate\Support\Facades\DB::commit();
         return response()->json(['status' => 'SUCCESS']);
         
     } catch (\Exception $e) {
-        DB::rollBack();
+        \Illuminate\Support\Facades\DB::rollBack();
         return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
     }
 });
@@ -325,7 +314,7 @@ Route::put('/profesores/{id}', function (Illuminate\Http\Request $request, $id) 
 
 Route::delete('/profesores/{id}', function ($id) {
     try {
-        DB::beginTransaction();
+        \Illuminate\Support\Facades\DB::beginTransaction();
 
         $sinLic = App\Models\Licenciatura::firstOrCreate(
             ['abreviatura' => 'S/L'],
@@ -354,11 +343,11 @@ Route::delete('/profesores/{id}', function ($id) {
         $profesor->licenciaturas()->detach();
         $profesor->delete();
 
-        DB::commit();
+        \Illuminate\Support\Facades\DB::commit();
         return response()->json(['status' => 'SUCCESS']);
         
     } catch (\Exception $e) {
-        DB::rollBack();
+        \Illuminate\Support\Facades\DB::rollBack();
         return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
     }
 });
@@ -369,9 +358,15 @@ Route::post('/profesores/excel', function (Request $request) {
     ]);
 
     try {
-        DB::beginTransaction();
+        DB::statement('PRAGMA foreign_keys = OFF;');
+        $tablas = ['grupo_tutorado', 'grupos', 'tutorados', 'semestres', 'licenciatura_profesor', 'profesores'];
+        foreach ($tablas as $tabla) {
+            DB::table($tabla)->delete();
+            DB::statement("DELETE FROM sqlite_sequence WHERE name='$tabla';");
+        }
+        DB::statement('PRAGMA foreign_keys = ON;');
 
-        Profesor::query()->delete();
+        DB::beginTransaction();
 
         $import = new class {};
         $data = \Maatwebsite\Excel\Facades\Excel::toArray($import, $request->file('file'))[0];
@@ -465,28 +460,13 @@ Route::get('/semestres', [SemestreController::class, 'index']);
 Route::post('/carga-masiva', [CargaDatosController::class, 'upload']);
 
 Route::get('/asignaciones/dashboard', function(Request $request) {
-    $filtroSemestre = $request->query('semestre', 'Todos');
-
+    // Consulta absoluta. Ya no se filtra por semestre de DB porque fue purgado previamente.
     $query = Grupo::with([
         'tutor.licenciaturas',
         'tutorados.licenciatura',
     ]);
 
-    if ($filtroSemestre !== 'Todos') {
-        $semestreObj = Semestre::where('clave', $filtroSemestre)->first();
-        if ($semestreObj) {
-            $query->where('semestre_id', $semestreObj->id);
-        } else {
-            return response()->json([
-                'semestres'     => Semestre::all(),
-                'tutores'       => [],
-                'licenciaturas' => Licenciatura::all(),
-            ]);
-        }
-    }
-
     $grupos = $query->get();
-
     $tutoresMap = [];
 
     foreach ($grupos as $grupo) {
@@ -545,11 +525,11 @@ Route::get('/asignaciones/dashboard', function(Request $request) {
     }
 
     return response()->json([
-        'semestres'     => Semestre::all(),
         'tutores'       => array_values($tutoresMap),
         'licenciaturas' => Licenciatura::all(),
     ]);
 });
+
 
 Route::get('/usuarios', function () {
     return response()->json(\App\Models\User::select('id', 'name', 'email', 'mfa_enabled')->get());
@@ -612,6 +592,141 @@ Route::post('/tutorados', function (Illuminate\Http\Request $request) {
     } catch (\Exception $e) {
         DB::rollBack();
         \Illuminate\Support\Facades\Log::error("Error guardando alumno: " . $e->getMessage());
+        return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
+    }
+});
+
+Route::post('/asignaciones/rebalanceo-manual', function (Illuminate\Http\Request $request) {
+    try {
+        \Illuminate\Support\Facades\DB::beginTransaction();
+        
+        $semestreActual = \App\Models\Semestre::where('tipo', 'actual')->first();
+        if (!$semestreActual) {
+            throw new \Exception('No hay semestre activo configurado.');
+        }
+
+        // 1. SINCRONIZACIÓN DE GRUPOS (Incluye a los tutores recién dados de alta)
+        $tutoresActivos = \App\Models\Profesor::where('estado', 'Activo')->pluck('id')->toArray();
+        $gruposExistentes = \Illuminate\Support\Facades\DB::table('grupos')
+            ->where('semestre_id', $semestreActual->id)
+            ->pluck('id', 'tutor_id')
+            ->toArray();
+
+        $nuevosGrupos = [];
+        foreach ($tutoresActivos as $tutorId) {
+            if (!isset($gruposExistentes[$tutorId])) {
+                $nuevosGrupos[] = [
+                    'semestre_id' => $semestreActual->id,
+                    'tutor_id' => $tutorId,
+                    'estado_tutor' => 'activo',
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ];
+            }
+        }
+        if (!empty($nuevosGrupos)) {
+            \Illuminate\Support\Facades\DB::table('grupos')->insert($nuevosGrupos);
+            $gruposExistentes = \Illuminate\Support\Facades\DB::table('grupos')
+                ->where('semestre_id', $semestreActual->id)
+                ->pluck('id', 'tutor_id')
+                ->toArray();
+        }
+
+        // 2. EXTRACCIÓN DE DATOS AISLADOS POR CARRERA
+        $tutoresLic = \Illuminate\Support\Facades\DB::table('licenciatura_profesor')
+            ->get()
+            ->groupBy('licenciatura_id');
+        $licenciaturas = \App\Models\Licenciatura::all();
+        
+        $pivotData = \Illuminate\Support\Facades\DB::table('grupo_tutorado')
+            ->join('tutorados', 'grupo_tutorado.tutorado_id', '=', 'tutorados.id')
+            ->where('grupo_tutorado.semestre_id', $semestreActual->id)
+            ->where('grupo_tutorado.estado_tutorado', 'activo')
+            ->where('tutorados.is_active', true)
+            ->select('grupo_tutorado.*', 'tutorados.licenciatura_id')
+            ->get();
+
+        $pisoMinimo = 15;
+        $reasignados = 0;
+
+        // 3. ALGORITMO DE ROBO JUSTO POR DIFERENCIAL (1 a 1)
+        foreach ($licenciaturas as $lic) {
+            $profesoresLicIds = $tutoresLic->get($lic->id)?->pluck('profesor_id')->toArray() ?? [];
+            if (empty($profesoresLicIds)) {
+                $profesoresLicIds = $tutoresActivos;
+            }
+
+            $gruposLicIds = array_intersect_key($gruposExistentes, array_flip($profesoresLicIds));
+            if (empty($gruposLicIds)) continue;
+
+            $capacidades = array_fill_keys($gruposLicIds, 0);
+            $bolsaSiCambiar = array_fill_keys($gruposLicIds, []);
+
+            foreach ($pivotData as $row) {
+                if ($row->licenciatura_id == $lic->id && isset($capacidades[$row->grupo_id])) {
+                    $capacidades[$row->grupo_id]++;
+                    
+                    // REGLA DE INTOCABLES: Solo los "Cambiar" entran a la bolsa de robo. Nuevo Ingreso queda exento.
+                    if ($row->movilidad === 'cambiar') {
+                        $bolsaSiCambiar[$row->grupo_id][] = $row->tutorado_id;
+                    }
+                }
+            }
+
+            $totalGrupos = count($capacidades);
+            if ($totalGrupos <= 1) continue; // No se puede robar a uno mismo
+
+            while (true) {
+                // Seleccionar al receptor más necesitado
+                asort($capacidades);
+                $receptorId = array_key_first($capacidades);
+                $minCount = $capacidades[$receptorId];
+
+                // Ordenar para encontrar a los más llenos
+                arsort($capacidades);
+                $donanteId = null;
+                
+                foreach ($capacidades as $gId => $count) {
+                    if ($gId === $receptorId) continue;
+                    
+                    // CONDICIÓN DE BALANCEO PERFECTO: Si la brecha entre el más lleno y el más vacío es 1 o 0, detener todo.
+                    if (($count - $minCount) <= 1) {
+                        continue; 
+                    }
+
+                    // CANIBALISMO INJUSTO: Verificar piso mínimo y que el tutor tenga saldo en la bolsa
+                    if ($count > $pisoMinimo && count($bolsaSiCambiar[$gId]) > 0) {
+                        $donanteId = $gId;
+                        break;
+                    }
+                }
+
+                // BOLSILLO VACÍO: Salida temprana si no hay donantes viables
+                if (!$donanteId) break;
+
+                // Extraer 1 alumno de la bolsa del donante
+                $alumnoRobadoId = array_pop($bolsaSiCambiar[$donanteId]);
+
+                \Illuminate\Support\Facades\DB::table('grupo_tutorado')
+                    ->where('tutorado_id', $alumnoRobadoId)
+                    ->where('semestre_id', $semestreActual->id)
+                    ->update([
+                        'grupo_id' => $receptorId,
+                        'updated_at' => now()
+                    ]);
+
+                // Actualizar métricas RAM para la siguiente iteración
+                $capacidades[$receptorId]++;
+                $capacidades[$donanteId]--;
+                $reasignados++;
+            }
+        }
+
+        \Illuminate\Support\Facades\DB::commit();
+        return response()->json(['status' => 'SUCCESS', 'message' => "Robo Justo completado. Se reubicaron $reasignados alumnos."]);
+
+    } catch (\Exception $e) {
+        \Illuminate\Support\Facades\DB::rollBack();
         return response()->json(['status' => 'FAILED', 'error' => $e->getMessage()], 500);
     }
 });

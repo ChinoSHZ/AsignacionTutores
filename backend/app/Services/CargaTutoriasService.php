@@ -8,6 +8,7 @@ use App\Models\Profesor;
 use App\Models\Grupo;
 use App\Models\Licenciatura;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Crypt;
 use Maatwebsite\Excel\Facades\Excel;
 
 class CargaTutoriasService
@@ -20,376 +21,399 @@ class CargaTutoriasService
         return strtoupper(preg_replace('/\s+/', '', $texto));
     }
 
+    private function extraerCuenta($fila) {
+        foreach ($fila as $k => $v) {
+            $val = preg_replace('/\.0+$/', '', (string)$v);
+            $val = preg_replace('/[^0-9]/', '', $val);
+            if (strlen($val) === 7) return $val; 
+        }
+        foreach ($fila as $k => $v) {
+            $kl = strtolower(trim($k));
+            if (str_contains($kl, 'cuenta') || str_contains($kl, 'n_mero') || str_contains($kl, 'numero')) {
+                $val = preg_replace('/\.0+$/', '', (string)$v);
+                $val = preg_replace('/[^0-9A-Za-z]/', '', $val);
+                if (!empty($val)) return $val;
+            }
+        }
+        return '';
+    }
+
+    private function extraerNombresTutorado($fila) {
+        $n = trim($fila['nombre_del_tutorado'] ?? $fila['nombre'] ?? '');
+        $p = trim($fila['apellido_paterno_tutorado'] ?? $fila['apellido_paterno'] ?? '');
+        $m = trim($fila['apellido_materno_tutorado'] ?? $fila['apellido_materno'] ?? '');
+        
+        if (!$n) {
+            foreach ($fila as $k => $v) {
+                $kl = str_replace('_', '', strtolower(trim($k)));
+                if (str_contains($kl, 'nombre') && !str_contains($kl, 'deltutor') && !str_ends_with($kl, 'tutor')) $n = trim((string)$v);
+            }
+        }
+        if (!$p) {
+            foreach ($fila as $k => $v) {
+                $kl = str_replace('_', '', strtolower(trim($k)));
+                if (str_contains($kl, 'paterno') && !str_contains($kl, 'deltutor') && !str_ends_with($kl, 'tutor')) $p = trim((string)$v);
+            }
+        }
+        if (!$m) {
+            foreach ($fila as $k => $v) {
+                $kl = str_replace('_', '', strtolower(trim($k)));
+                if (str_contains($kl, 'materno') && !str_contains($kl, 'deltutor') && !str_ends_with($kl, 'tutor')) $m = trim((string)$v);
+            }
+        }
+        return [$n, $p, $m];
+    }
+
+    private function extraerNombresTutor($fila) {
+        $n = trim($fila['nombre_del_tutor'] ?? '');
+        $p = trim($fila['apellido_paterno_tutor'] ?? '');
+        $m = trim($fila['apellido_materno_tutor'] ?? '');
+        
+        if (!$n) {
+            foreach ($fila as $k => $v) {
+                $kl = str_replace('_', '', strtolower(trim($k)));
+                if (str_contains($kl, 'nombre') && str_contains($kl, 'tutor') && !str_contains($kl, 'tutorado')) $n = trim((string)$v);
+            }
+        }
+        if (!$p) {
+            foreach ($fila as $k => $v) {
+                $kl = str_replace('_', '', strtolower(trim($k)));
+                if (str_contains($kl, 'paterno') && str_contains($kl, 'tutor') && !str_contains($kl, 'tutorado')) $p = trim((string)$v);
+            }
+        }
+        if (!$m) {
+            foreach ($fila as $k => $v) {
+                $kl = str_replace('_', '', strtolower(trim($k)));
+                if (str_contains($kl, 'materno') && str_contains($kl, 'tutor') && !str_contains($kl, 'tutorado')) $m = trim((string)$v);
+            }
+        }
+        return [$n, $p, $m];
+    }
+
+    private function extraerLic($fila) {
+        $raw = trim($fila['licenciatura_tutorado'] ?? $fila['licenciatura_tutor'] ?? $fila['licenciatura'] ?? $fila['carrera'] ?? '');
+        if (!$raw) {
+            foreach ($fila as $k => $v) {
+                $kl = strtolower(trim($k));
+                if (str_contains($kl, 'licenciatura') || str_contains($kl, 'carrera')) return trim((string)$v);
+            }
+        }
+        return $raw;
+    }
+
+    private function extraerEstadoPropuesta($fila) {
+        foreach ($fila as $k => $v) {
+            $kl = str_replace('_', '', strtolower(trim($k)));
+            if (str_contains($kl, 'estado') || str_contains($kl, 'cambiar')) {
+                return strtoupper(trim((string)$v));
+            }
+        }
+        return '';
+    }
+
     public function procesarCargaMasiva($fileNuevos, $fileHistorico, $filePropuesta, $claveSemestre)
     {
-        try {
-            // Desactivar restricciones y sincronización estricta temporalmente para acelerar SQLite
-            DB::statement('PRAGMA foreign_keys = OFF;');
-            DB::statement('PRAGMA synchronous = OFF;');
+        ini_set('max_execution_time', '0');
+        ini_set('memory_limit', '-1');
+        DB::connection()->disableQueryLog();
 
-            DB::transaction(function () use ($fileNuevos, $fileHistorico, $filePropuesta, $claveSemestre) {
+        try {
+            $lector = new class implements \Maatwebsite\Excel\Concerns\WithHeadingRow {
+                public function headingRow(): int { return 1; }
+            };
+
+            $datosPropuesta = $filePropuesta ? Excel::toArray($lector, $filePropuesta)[0] : [];
+            $datosHistorico = $fileHistorico ? Excel::toArray($lector, $fileHistorico)[0] : [];
+            $datosNuevos = $fileNuevos ? Excel::toArray($lector, $fileNuevos)[0] : [];
+
+            DB::transaction(function () use ($datosNuevos, $datosHistorico, $datosPropuesta, $claveSemestre) {
                 
-                // 1. REQ 2: Ventana deslizante de semestres (Actual / Anterior)
                 $semestreAnterior = Semestre::where('tipo', 'actual')->first();
                 if ($semestreAnterior && $semestreAnterior->clave !== $claveSemestre) {
-                    Semestre::avanzar($claveSemestre);
+                    DB::table('grupo_tutorado')->delete();
+                    DB::table('grupos')->delete();
+                    DB::table('semestres')->delete();
+                    Semestre::create(['clave' => $claveSemestre, 'tipo' => 'actual']);
                 } elseif (!$semestreAnterior) {
                     Semestre::create(['clave' => $claveSemestre, 'tipo' => 'actual']);
                 }
-                
                 $semestreActual = Semestre::where('tipo', 'actual')->first();
-                $semestreAnteriorInstancia = Semestre::where('tipo', 'anterior')->first();
 
-                $alumnosProcesados = []; 
-                $asignacionesHistoricasAnteriores = [];
+                $cuentasNuevos = [];
+                foreach ($datosNuevos as $fila) {
+                    $cuenta = $this->extraerCuenta($fila);
+                    if ($cuenta) $cuentasNuevos[] = $cuenta;
+                }
+                if (!empty($cuentasNuevos)) {
+                    Tutorado::whereIn('numero_cuenta', $cuentasNuevos)->delete();
+                }
 
-                if ($semestreAnteriorInstancia) {
-                    $viejas = DB::table('grupo_tutorado')
-                        ->where('semestre_id', $semestreAnteriorInstancia->id)
-                        ->get();
-                    foreach($viejas as $v) {
-                        $asignacionesHistoricasAnteriores[$v->tutorado_id] = $v->grupo_id;
+                $licenciaturas = Licenciatura::all();
+                $sinLicId = 1;
+                foreach ($licenciaturas as $l) {
+                    if ($this->limpiar($l->abreviatura) === 'S/L') {
+                        $sinLicId = $l->id; break;
                     }
                 }
 
-                $tutores = Profesor::all();
-                $licenciaturas = Licenciatura::all();
+                $identificarLicenciatura = function($texto) use ($licenciaturas, $sinLicId) {
+                    $txt = $this->limpiar($texto);
+                    if (!$txt) return $sinLicId;
+                    foreach ($licenciaturas as $l) {
+                        if ($txt === $this->limpiar($l->abreviatura) || $txt === $this->limpiar($l->nombre)) return $l->id;
+                        $kws = ['COMPUTACION', 'MECANICA', 'SISTEMAS', 'CIVIL', 'ELECTRONICA', 'INTELIGENCIA'];
+                        foreach ($kws as $kw) {
+                            if (str_contains($this->limpiar($l->nombre), $kw) && str_contains($txt, $kw)) return $l->id;
+                        }
+                    }
+                    return $sinLicId;
+                };
+
+                $tutores = Profesor::where('estado', 'Activo')->get();
+                $mapaTutores = [];
+                foreach ($tutores as $t) {
+                    $keyFull = $this->limpiar($t->apellido_paterno) . '_' . $this->limpiar($t->apellido_materno) . '_' . $this->limpiar($t->nombre);
+                    $keyParcial = $this->limpiar($t->apellido_paterno) . '__' . $this->limpiar($t->nombre);
+                    $mapaTutores[$keyFull] = $t->id;
+                    $mapaTutores[$keyParcial] = $t->id;
+                }
+
+                $gruposExistentes = Grupo::where('semestre_id', $semestreActual->id)->pluck('id', 'tutor_id')->toArray();
+                $nuevosGrupos = [];
+                foreach ($tutores as $t) {
+                    if (!isset($gruposExistentes[$t->id])) {
+                        $nuevosGrupos[] = ['semestre_id' => $semestreActual->id, 'tutor_id' => $t->id, 'estado_tutor' => 'activo', 'created_at' => now(), 'updated_at' => now()];
+                    }
+                }
+                if (!empty($nuevosGrupos)) {
+                    Grupo::insert($nuevosGrupos);
+                    $gruposExistentes = Grupo::where('semestre_id', $semestreActual->id)->pluck('id', 'tutor_id')->toArray();
+                }
+
+                $buscarTutorId = function($fila) use ($mapaTutores) {
+                    list($n, $p, $m) = $this->extraerNombresTutor($fila);
+                    $pn = $this->limpiar($p);
+                    $mn = $this->limpiar($m);
+                    $nn = $this->limpiar($n);
+                    return $mapaTutores[$pn.'_'.$mn.'_'.$nn] ?? $mapaTutores[$pn.'__'.$nn] ?? null;
+                };
+
+                $tutoradosRAM = [];
+                $asignaciones = [];
+                $cuentasProcesadas = [];
+                $nuevosIngresosCuentas = [];
+
+                $procesarFila = function($fila, $esNuevo, $esHistorico, $esPropuesta) use (&$tutoradosRAM, &$asignaciones, &$nuevosIngresosCuentas, &$cuentasProcesadas, $identificarLicenciatura, $sinLicId, $buscarTutorId, $gruposExistentes) {
+                    $cuenta = $this->extraerCuenta($fila);
+                    if (!$cuenta) return;
+
+                    $licId = $identificarLicenciatura($this->extraerLic($fila));
+                    $periodo = trim($fila['semestre_ingreso'] ?? $fila['periodo_ingreso'] ?? 'N/A');
+                    list($nom, $apP, $apM) = $this->extraerNombresTutorado($fila);
+
+                    if (!isset($tutoradosRAM[$cuenta])) {
+                        $tutoradosRAM[$cuenta] = [
+                            'numero_cuenta' => $cuenta,
+                            'nombre' => $nom,
+                            'apellido_paterno' => $apP,
+                            'apellido_materno' => $apM,
+                            'periodo_ingreso' => $periodo,
+                            'licenciatura_id' => $licId,
+                            'is_active' => true,
+                        ];
+                    } else {
+                        if ($tutoradosRAM[$cuenta]['licenciatura_id'] === $sinLicId && $licId !== $sinLicId) $tutoradosRAM[$cuenta]['licenciatura_id'] = $licId;
+                        if ($tutoradosRAM[$cuenta]['periodo_ingreso'] === 'N/A' && $periodo !== 'N/A') $tutoradosRAM[$cuenta]['periodo_ingreso'] = $periodo;
+                    }
+
+                    $tutorId = $buscarTutorId($fila);
+
+                    if ($esPropuesta) {
+                        $estado = $this->extraerEstadoPropuesta($fila);
+                        $movilidad = (str_contains($estado, 'CAMBIAR') && !str_contains($estado, 'NO')) ? 'cambiar' : 'no_cambiar';
+                        if ($tutorId && isset($gruposExistentes[$tutorId])) {
+                            $asignaciones[$cuenta] = ['grupo_id' => $gruposExistentes[$tutorId], 'movilidad' => $movilidad, 'origen' => 'propuesta'];
+                        }
+                    } elseif ($esHistorico) {
+                        if (!isset($asignaciones[$cuenta]) && $tutorId && isset($gruposExistentes[$tutorId])) {
+                            $asignaciones[$cuenta] = ['grupo_id' => $gruposExistentes[$tutorId], 'movilidad' => 'cambiar', 'origen' => 'historico'];
+                        }
+                    } elseif ($esNuevo) {
+                        if (isset($asignaciones[$cuenta]) && $asignaciones[$cuenta]['origen'] === 'propuesta') {
+                            $asignaciones[$cuenta]['movilidad'] = 'nuevo_ingreso';
+                        } else {
+                            if ($tutorId && isset($gruposExistentes[$tutorId])) {
+                                $asignaciones[$cuenta] = ['grupo_id' => $gruposExistentes[$tutorId], 'movilidad' => 'nuevo_ingreso', 'origen' => 'nuevo'];
+                            } else {
+                                if (isset($asignaciones[$cuenta])) unset($asignaciones[$cuenta]);
+                                $nuevosIngresosCuentas[$cuenta] = true;
+                            }
+                        }
+                    }
+                    $cuentasProcesadas[$cuenta] = true;
+                };
+
+                foreach ($datosPropuesta as $fila) $procesarFila($fila, false, false, true);
+                foreach ($datosHistorico as $fila) $procesarFila($fila, false, true, false);
+                foreach ($datosNuevos as $fila) $procesarFila($fila, true, false, false);
+
+                $now = now();
+                $tutoradosUpsertFinal = [];
+                foreach ($tutoradosRAM as $datos) {
+                    $tutoradosUpsertFinal[] = [
+                        'numero_cuenta' => $datos['numero_cuenta'],
+                        'nombre' => Crypt::encryptString($datos['nombre']),
+                        'apellido_paterno' => Crypt::encryptString($datos['apellido_paterno']),
+                        'apellido_materno' => Crypt::encryptString($datos['apellido_materno']),
+                        'periodo_ingreso' => $datos['periodo_ingreso'],
+                        'licenciatura_id' => $datos['licenciatura_id'],
+                        'is_active' => $datos['is_active'],
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
+
+                $chunks = array_chunk($tutoradosUpsertFinal, 1000);
+                foreach ($chunks as $chunk) {
+                    Tutorado::upsert($chunk, ['numero_cuenta'], ['nombre', 'apellido_paterno', 'apellido_materno', 'periodo_ingreso', 'licenciatura_id', 'is_active', 'updated_at']);
+                }
+
+                Tutorado::whereNotIn('numero_cuenta', array_keys($cuentasProcesadas))->update(['is_active' => false]);
                 
-                // Caché en memoria para evitar consultas redundantes y bloqueos
-                $licenciaturasDict = $licenciaturas->keyBy('abreviatura');
-                $gruposCache = []; 
-                $pivotBatch = []; // Acumulador para inserciones masivas en grupo_tutorado
+                $tutoradosDbRaw = Tutorado::whereIn('numero_cuenta', array_keys($cuentasProcesadas))->pluck('id', 'numero_cuenta')->toArray();
+                $tutoradosDbStrings = [];
+                foreach ($tutoradosDbRaw as $k => $v) $tutoradosDbStrings[(string)$k] = $v;
 
-                $lector = new class implements \Maatwebsite\Excel\Concerns\WithHeadingRow {
-                    public function headingRow(): int { return 1; }
-                };
+                $matrizAsignaciones = []; 
+                foreach ($asignaciones as $cuenta => $datos) {
+                    if (isset($tutoradosDbStrings[(string)$cuenta])) {
+                        $matrizAsignaciones[$tutoradosDbStrings[(string)$cuenta]] = $datos;
+                    }
+                }
 
-                $buscarTutor = function($fila) use ($tutores) {
-                    $val1 = $this->limpiar($fila['nombre_del_tutor'] ?? '');
-                    $val2 = $this->limpiar($fila['apellido_paterno_tutor'] ?? '');
-                    $val3 = $this->limpiar($fila['apellido_materno_tutor'] ?? '');
+                $tutoresLic = DB::table('licenciatura_profesor')->get()->groupBy('licenciatura_id');
+                $poolGlobalTutoresIds = $tutores->pluck('id')->toArray();
 
-                    if (!$val1 && !$val2) return null;
+                foreach ($licenciaturas as $lic) {
+                    $profesoresLicIds = $tutoresLic->get($lic->id)?->pluck('profesor_id')->toArray() ?? [];
+                    if (empty($profesoresLicIds)) $profesoresLicIds = $poolGlobalTutoresIds;
 
-                    return $tutores->first(function($p) use ($val1, $val2, $val3) {
-                        $dbNom = $this->limpiar($p->nombre);
-                        $dbPat = $this->limpiar($p->apellido_paterno);
-                        
-                        if ($dbNom === $val1 && $dbPat === $val2) return true;
-                        if ($dbNom === $val3 && $dbPat === $val1) return true;
-                        if ($dbNom === $val2 && $dbPat === $val1) return true;
+                    $gruposLicIds = array_intersect_key($gruposExistentes, array_flip($profesoresLicIds));
+                    if (empty($gruposLicIds)) continue;
 
-                        return false;
-                    });
-                };
+                    $capacidadTutores = array_fill_keys($gruposLicIds, 0);
+                    $alumnosLicDb = Tutorado::where('licenciatura_id', $lic->id)->where('is_active', true)->pluck('numero_cuenta', 'id')->toArray();
 
-                // Función auxiliar para registrar en el batch en lugar de insertar 1 a 1
-                $registrarPivot = function($tutoradoId, $grupoId, $estado, $movilidad) use (&$pivotBatch, $semestreActual) {
-                    $pivotBatch[$tutoradoId] = [
+                    foreach ($alumnosLicDb as $tutoradoId => $cuentaDb) {
+                        if (isset($matrizAsignaciones[$tutoradoId])) {
+                            $gId = $matrizAsignaciones[$tutoradoId]['grupo_id'];
+                            if (isset($capacidadTutores[$gId])) $capacidadTutores[$gId]++;
+                        }
+                    }
+
+                    $nuevosLicIds = [];
+                    foreach ($alumnosLicDb as $tutoradoId => $cuentaDb) {
+                        $cuentaLimpia = preg_replace('/[^0-9A-Za-z]/', '', (string)$cuentaDb);
+                        if (isset($nuevosIngresosCuentas[$cuentaLimpia])) {
+                            $nuevosLicIds[] = $tutoradoId;
+                        }
+                    }
+                    shuffle($nuevosLicIds);
+
+                    // ALGORITMO ROUND-ROBIN PARA NUEVO INGRESO
+                    asort($capacidadTutores);
+                    $gruposLicArray = array_keys($capacidadTutores);
+                    $idxRR = 0;
+                    $totalGruposLic = count($gruposLicArray);
+
+                    foreach ($nuevosLicIds as $tutoradoId) {
+                        if ($totalGruposLic > 0) {
+                            $grupoId = $gruposLicArray[$idxRR % $totalGruposLic];
+                            $matrizAsignaciones[$tutoradoId] = ['grupo_id' => $grupoId, 'movilidad' => 'nuevo_ingreso'];
+                            $capacidadTutores[$grupoId]++;
+                            $idxRR++;
+                        }
+                    }
+
+                    $lockedGroups = [];
+                    while (true) {
+                        asort($capacidadTutores);
+                        $minGroupId = array_key_first($capacidadTutores);
+                        $minCount = $capacidadTutores[$minGroupId];
+
+                        arsort($capacidadTutores);
+                        $maxGroupId = null;
+                        $maxCount = -1;
+                        foreach ($capacidadTutores as $gId => $c) {
+                            if (!in_array($gId, $lockedGroups)) {
+                                $maxGroupId = $gId; $maxCount = $c; break;
+                            }
+                        }
+
+                        if ($maxGroupId === null || ($maxCount - $minCount) <= 1) break;
+
+                        $candidatoId = null;
+                        foreach ($matrizAsignaciones as $tId => $data) {
+                            // BLOQUEO DE NUEVO INGRESO: Solo se mueven alumnos etiquetados como 'cambiar'
+                            if ($data['grupo_id'] === $maxGroupId && $data['movilidad'] === 'cambiar' && isset($alumnosLicDb[$tId])) {
+                                $candidatoId = $tId; break;
+                            }
+                        }
+
+                        if ($candidatoId) {
+                            $matrizAsignaciones[$candidatoId]['grupo_id'] = $minGroupId;
+                            $capacidadTutores[$maxGroupId]--;
+                            $capacidadTutores[$minGroupId]++;
+                        } else {
+                            $lockedGroups[] = $maxGroupId;
+                        }
+                    }
+                }
+
+                $asignadosIds = array_keys($matrizAsignaciones);
+                $nuevosIngresosIds = [];
+                foreach ($nuevosIngresosCuentas as $cuenta => $val) {
+                    if (isset($tutoradosDbStrings[(string)$cuenta])) {
+                        $nuevosIngresosIds[] = $tutoradosDbStrings[(string)$cuenta];
+                    }
+                }
+                
+                $huerfanos = array_diff($nuevosIngresosIds, $asignadosIds);
+                if (!empty($huerfanos) && !empty($gruposExistentes)) {
+                    $capacidadGlobal = array_fill_keys(array_values($gruposExistentes), 0);
+                    foreach ($matrizAsignaciones as $datos) {
+                        if (isset($capacidadGlobal[$datos['grupo_id']])) $capacidadGlobal[$datos['grupo_id']]++;
+                    }
+                    foreach ($huerfanos as $mId) {
+                        asort($capacidadGlobal);
+                        $grupoGlobalMin = array_key_first($capacidadGlobal);
+                        $matrizAsignaciones[$mId] = ['grupo_id' => $grupoGlobalMin, 'movilidad' => 'nuevo_ingreso'];
+                        $capacidadGlobal[$grupoGlobalMin]++;
+                    }
+                }
+
+                DB::table('grupo_tutorado')->where('semestre_id', $semestreActual->id)->delete();
+                $pivotInserts = [];
+                foreach ($matrizAsignaciones as $tutoradoId => $datos) {
+                    $pivotInserts[] = [
                         'tutorado_id' => $tutoradoId,
                         'semestre_id' => $semestreActual->id,
-                        'grupo_id' => $grupoId,
-                        'estado_tutorado' => $estado,
-                        'movilidad' => $movilidad,
-                        'created_at' => now()->toDateTimeString(),
-                        'updated_at' => now()->toDateTimeString(),
+                        'grupo_id' => $datos['grupo_id'],
+                        'estado_tutorado' => 'activo',
+                        'movilidad' => $datos['movilidad'],
+                        'created_at' => now(),
+                        'updated_at' => now(),
                     ];
-                };
-
-                // 2. EXCEL HISTÓRICO
-                $asignacionesNuevas = []; 
-                if ($fileHistorico) {
-                    $datos = Excel::toArray($lector, $fileHistorico)[0];
-                    foreach ($datos as $fila) {
-                        $cuenta = trim($fila['numero_de_cuenta'] ?? $fila['numero_cuenta'] ?? $fila['numerodecuenta'] ?? '');
-                        if (!$cuenta) continue;
-
-                        $abreviatura = trim($fila['licenciatura'] ?? '');
-                        $licId = isset($licenciaturasDict[$abreviatura]) ? $licenciaturasDict[$abreviatura]->id : 1;
-
-                        $tutorado = Tutorado::updateOrCreate(
-                            ['numero_cuenta' => $cuenta],
-                            [
-                                'nombre' => trim($fila['nombre_del_tutorado'] ?? ''),
-                                'apellido_paterno' => trim($fila['apellido_paterno_tutorado'] ?? ''),
-                                'apellido_materno' => trim($fila['apellido_materno_tutorado'] ?? null),
-                                'periodo_ingreso' => trim($fila['periodo_ingreso'] ?? ''),
-                                'licenciatura_id' => $licId,
-                                'is_active' => true,
-                            ]
-                        );
-                        $alumnosProcesados[] = $tutorado->id;
-
-                        $prof = $buscarTutor($fila);
-                        
-                        if ($prof) {
-                            $asignacionesNuevas[$cuenta] = clone $prof; 
-                            
-                            if (!isset($gruposCache[$prof->id])) {
-                                $grupo = Grupo::firstOrCreate(['semestre_id' => $semestreActual->id, 'tutor_id' => $prof->id]);
-                                $gruposCache[$prof->id] = $grupo->id;
-                            }
-                            
-                            $registrarPivot($tutorado->id, $gruposCache[$prof->id], 'activo', 'no_cambiar');
-                        }
-                    }
                 }
 
-                // 3. EXCEL NUEVOS INGRESOS
-                if ($fileNuevos) {
-                    $datos = Excel::toArray($lector, $fileNuevos)[0];
-                    foreach ($datos as $fila) {
-                        $cuenta = trim($fila['numero_de_cuenta'] ?? $fila['numero_cuenta'] ?? $fila['numerodecuenta'] ?? '');
-                        if (!$cuenta) continue;
-
-                        $abreviatura = trim($fila['licenciatura_tutorado'] ?? '');
-                        $licId = isset($licenciaturasDict[$abreviatura]) ? $licenciaturasDict[$abreviatura]->id : 1;
-                        $tutoradoExiste = Tutorado::where('numero_cuenta', $cuenta)->exists();
-
-                        $tutorado = Tutorado::updateOrCreate(
-                            ['numero_cuenta' => $cuenta],
-                            [
-                                'nombre' => trim($fila['nombre_del_tutorado'] ?? ''),
-                                'apellido_paterno' => trim($fila['apellido_paterno_tutorado'] ?? ''),
-                                'apellido_materno' => trim($fila['apellido_materno_tutorado'] ?? null),
-                                'periodo_ingreso' => trim($fila['semestre_ingreso'] ?? $fila['periodo_ingreso'] ?? ''),
-                                'licenciatura_id' => $licId,
-                                'is_active' => true,
-                            ]
-                        );
-                        $alumnosProcesados[] = $tutorado->id;
-
-                        if (!isset($asignacionesNuevas[$cuenta])) {
-                            $prof = $buscarTutor($fila);
-                            
-                            if ($prof) {
-                                if (!isset($gruposCache[$prof->id])) {
-                                    $grupo = Grupo::firstOrCreate(['semestre_id' => $semestreActual->id, 'tutor_id' => $prof->id]);
-                                    $gruposCache[$prof->id] = $grupo->id;
-                                }
-                                
-                                $movilidad = $tutoradoExiste ? 'no_cambiar' : 'nuevo_ingreso';
-                                $registrarPivot($tutorado->id, $gruposCache[$prof->id], 'activo', $movilidad);
-                            }
-                        }
-                    }
+                $chunksPivot = array_chunk($pivotInserts, 1000);
+                foreach ($chunksPivot as $chunk) {
+                    DB::table('grupo_tutorado')->insert($chunk);
                 }
-
-                // 4. EXCEL PROPUESTA SEMESTRE
-                if ($filePropuesta) {
-                    $datos = Excel::toArray($lector, $filePropuesta)[0];
-                    foreach ($datos as $fila) {
-                        $cuenta = trim($fila['numero_de_cuenta'] ?? $fila['numero_cuenta'] ?? $fila['numerodecuenta'] ?? '');
-                        if (!$cuenta) continue;
-
-                        $tutorado = Tutorado::where('numero_cuenta', $cuenta)->first();
-                        if (!$tutorado) continue; 
-
-                        $alumnosProcesados[] = $tutorado->id;
-                        $tutorado->update(['is_active' => true]); 
-
-                        $prof = $buscarTutor($fila);
-                        
-                        if ($prof) {
-                            if (!isset($gruposCache[$prof->id])) {
-                                $grupo = Grupo::firstOrCreate(['semestre_id' => $semestreActual->id, 'tutor_id' => $prof->id]);
-                                $gruposCache[$prof->id] = $grupo->id;
-                            }
-
-                            $movilidad = 'no_cambiar';
-                            $estadoExcelKey = isset($fila['estado_cambiar_no_cambiar']) ? 'estado_cambiar_no_cambiar' : 'estado';
-                            $estadoExcel = strtoupper(trim($fila[$estadoExcelKey] ?? ''));
-
-                            if (isset($asignacionesHistoricasAnteriores[$tutorado->id])) {
-                                $grupoAntId = $asignacionesHistoricasAnteriores[$tutorado->id];
-                                $grupoAnt = Grupo::find($grupoAntId);
-                                if ($grupoAnt && $grupoAnt->tutor_id !== $prof->id) {
-                                    $movilidad = 'cambiar'; 
-                                }
-                            } else {
-                                if (str_contains($estadoExcel, 'CAMBIAR') && !str_contains($estadoExcel, 'NO')) {
-                                    $movilidad = 'cambiar';
-                                }
-                            }
-
-                            $registrarPivot($tutorado->id, $gruposCache[$prof->id], 'activo', $movilidad);
-                        }
-                    }
-                }
-
-                // Inserción masiva segmentada (Evita el límite de variables de SQLite)
-                $chunks = array_chunk(array_values($pivotBatch), 500);
-                foreach ($chunks as $chunk) {
-                    DB::table('grupo_tutorado')->upsert(
-                        $chunk, 
-                        ['tutorado_id', 'semestre_id'], 
-                        ['grupo_id', 'estado_tutorado', 'movilidad', 'updated_at']
-                    );
-                }
-
-                $alumnosProcesados = array_unique($alumnosProcesados);
-                
-                // Desactivar inactivos procesando en lotes para evitar error de >999 variables
-                $todosTutoradosIds = Tutorado::pluck('id')->toArray();
-                $idsParaDesactivar = array_diff($todosTutoradosIds, $alumnosProcesados);
-                
-                foreach (array_chunk($idsParaDesactivar, 500) as $chunkIds) {
-                    Tutorado::whereIn('id', $chunkIds)->update(['is_active' => false]);
-                }
-                
-                if ($semestreAnteriorInstancia) {
-                    // Filtrar en memoria para no exceder límites de parámetros SQL
-                    $asignacionesViejas = DB::table('grupo_tutorado')
-                        ->where('semestre_id', $semestreAnteriorInstancia->id)
-                        ->get()
-                        ->filter(function($asig) use ($alumnosProcesados) {
-                            return !in_array($asig->tutorado_id, $alumnosProcesados);
-                        });
-
-                    $bajasBatch = [];
-                    foreach($asignacionesViejas as $asig) {
-                        $grupoViejo = Grupo::find($asig->grupo_id);
-                        if ($grupoViejo) {
-                            if (!isset($gruposCache[$grupoViejo->tutor_id])) {
-                                $grupoNuevo = Grupo::firstOrCreate([
-                                    'semestre_id' => $semestreActual->id,
-                                    'tutor_id' => $grupoViejo->tutor_id
-                                ]);
-                                $gruposCache[$grupoViejo->tutor_id] = $grupoNuevo->id;
-                            }
-                            
-                            $bajasBatch[] = [
-                                'tutorado_id' => $asig->tutorado_id,
-                                'semestre_id' => $semestreActual->id,
-                                'grupo_id' => $gruposCache[$grupoViejo->tutor_id],
-                                'estado_tutorado' => 'baja',
-                                'movilidad' => 'no_cambiar',
-                                'created_at' => now()->toDateTimeString(),
-                                'updated_at' => now()->toDateTimeString(),
-                            ];
-                        }
-                    }
-
-                    foreach (array_chunk($bajasBatch, 500) as $chunk) {
-                        DB::table('grupo_tutorado')->upsert(
-                            $chunk, 
-                            ['tutorado_id', 'semestre_id'], 
-                            ['grupo_id', 'estado_tutorado', 'movilidad', 'updated_at']
-                        );
-                    }
-                }
-
-                // ===================================================================================
-                // 5. ALGORITMO FINAL DE DISTRIBUCIÓN POR CARRERA
-                // ===================================================================================
-
-                $licenciaturasTotales = Licenciatura::all();
-
-                foreach ($licenciaturasTotales as $lic) {
-                    $tutoresActivos = Profesor::where('estado', 'Activo')
-                        ->whereHas('licenciaturas', function ($query) use ($lic) {
-                            $query->where('licenciaturas.id', $lic->id);
-                        })->get();
-
-                    $totalTutores = $tutoresActivos->count();
-                    if ($totalTutores === 0) continue; 
-
-                    $alumnosActivos = Tutorado::where('licenciatura_id', $lic->id)
-                        ->where('is_active', true)
-                        ->get();
-
-                    $totalAlumnos = $alumnosActivos->count();
-                    if ($totalAlumnos === 0) continue;
-
-                    $metaPorTutor = (int) round($totalAlumnos / $totalTutores);
-
-                    $capacidadTutores = [];
-                    $gruposDeLicenciatura = [];
-
-                    foreach ($tutoresActivos as $tutor) {
-                        if (!isset($gruposCache[$tutor->id])) {
-                            $grupo = Grupo::firstOrCreate([
-                                'semestre_id' => $semestreActual->id,
-                                'tutor_id' => $tutor->id
-                            ]);
-                            $gruposCache[$tutor->id] = $grupo->id;
-                        }
-                        $gruposDeLicenciatura[] = $gruposCache[$tutor->id];
-                        $capacidadTutores[$gruposCache[$tutor->id]] = 0; 
-                    }
-
-                    $alumnosFijos = DB::table('grupo_tutorado')
-                        ->where('semestre_id', $semestreActual->id)
-                        ->where('estado_tutorado', 'activo')
-                        ->where('movilidad', 'no_cambiar')
-                        ->whereIn('grupo_id', $gruposDeLicenciatura)
-                        ->get();
-
-                    foreach ($alumnosFijos as $fijo) {
-                        if (isset($capacidadTutores[$fijo->grupo_id])) {
-                            $capacidadTutores[$fijo->grupo_id]++;
-                        }
-                    }
-
-                    // Filtrado en memoria para evitar colapso de variable SQLite
-                    $alumnosActivosIds = $alumnosActivos->pluck('id')->toArray();
-                    $alumnosParaMover = DB::table('grupo_tutorado')
-                        ->where('semestre_id', $semestreActual->id)
-                        ->where('estado_tutorado', 'activo')
-                        ->whereIn('movilidad', ['cambiar', 'nuevo_ingreso'])
-                        ->get()
-                        ->filter(function($pivot) use ($alumnosActivosIds) {
-                            return in_array($pivot->tutorado_id, $alumnosActivosIds);
-                        })
-                        ->pluck('tutorado_id')
-                        ->toArray();
-
-                    shuffle($alumnosParaMover);
-
-                    $updatesBatch = [];
-                    foreach ($alumnosParaMover as $tutoradoId) {
-                        $gruposDisponibles = array_filter($capacidadTutores, function($count) use ($metaPorTutor) {
-                            return $count < $metaPorTutor;
-                        });
-
-                        if (empty($gruposDisponibles)) {
-                            $gruposDisponibles = $capacidadTutores;
-                        }
-
-                        asort($gruposDisponibles);
-                        
-                        $grupoSeleccionadoId = array_key_first($gruposDisponibles);
-
-                        $updatesBatch[] = [
-                            'tutorado_id' => $tutoradoId,
-                            'semestre_id' => $semestreActual->id,
-                            'grupo_id' => $grupoSeleccionadoId,
-                            'estado_tutorado' => 'activo',
-                            'movilidad' => 'cambiar',
-                            'updated_at' => now()->toDateTimeString(),
-                        ];
-
-                        $capacidadTutores[$grupoSeleccionadoId]++;
-                    }
-
-                    foreach (array_chunk($updatesBatch, 500) as $chunk) {
-                        DB::table('grupo_tutorado')->upsert(
-                            $chunk, 
-                            ['tutorado_id', 'semestre_id'], 
-                            ['grupo_id', 'updated_at']
-                        );
-                    }
-                }
-                
             });
-
-            DB::statement('PRAGMA foreign_keys = ON;');
-            DB::statement('PRAGMA synchronous = NORMAL;');
 
             return ['success' => true, 'message' => 'Carga de datos completada correctamente.'];
         } catch (\Throwable $e) {
-            DB::statement('PRAGMA foreign_keys = ON;');
-            DB::statement('PRAGMA synchronous = NORMAL;');
             return ['success' => false, 'error' => 'Error backend: ' . $e->getMessage() . ' Linea: ' . $e->getLine()];
         }
     }

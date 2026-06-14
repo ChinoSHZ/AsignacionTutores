@@ -16,6 +16,8 @@ class CargaDatosController extends Controller
 
 public function upload(Request $request)
     {
+        set_time_limit(0);
+        
         $request->validate([
             'semestre_clave' => 'required|string|max:10', // Ej: 2024A
             'file_nuevos'    => 'required|file|mimes:xlsx,xls,csv',
